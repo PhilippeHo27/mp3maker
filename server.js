@@ -587,8 +587,8 @@ app.get(`${BASE_PATH}/thumbnail/:sessionId`, (req, res) => {
     return res.status(404).json({ error: 'Session not found' });
   }
   
-  // Return thumbnail URL or fallback
-  const thumbnailUrl = session.thumbnailUrl || '/oops.jpg';
+  // Return thumbnail URL or fallback (with BASE_PATH)
+  const thumbnailUrl = session.thumbnailUrl || `${BASE_PATH}/oops.jpg`;
   res.json({ thumbnailUrl });
 });
 

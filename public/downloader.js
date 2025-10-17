@@ -124,7 +124,7 @@ downloadReadyBtn.addEventListener('click', () => {
   
   // Create download link
   const link = document.createElement('a');
-  link.href = `/file/${currentSessionId}`;
+  link.href = `${BASE_PATH}/file/${currentSessionId}`;
   link.download = 'audio.mp3';
   document.body.appendChild(link);
   link.click();
@@ -219,14 +219,14 @@ async function fetchThumbnail(sessionId) {
       thumbnailImage.src = data.thumbnailUrl;
       thumbnailImage.onerror = () => {
         // Fallback to oops.jpg if thumbnail fails to load
-        thumbnailImage.src = '/oops.jpg';
+        thumbnailImage.src = `${BASE_PATH}/oops.jpg`;
       };
       showThumbnail();
     }
   } catch (error) {
     console.error('Failed to fetch thumbnail:', error);
     // Use fallback image
-    thumbnailImage.src = '/oops.jpg';
+    thumbnailImage.src = `${BASE_PATH}/oops.jpg`;
     showThumbnail();
   }
 }
