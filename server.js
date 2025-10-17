@@ -7,13 +7,14 @@ const app = express();
 
 // Configuration
 const PORT = process.env.PORT || 3003;
+const BASE_PATH = process.env.BASE_PATH || ''; // Empty for local, '/mp3maker' for production
 
 // Store active download sessions
 const activeSessions = new Map();
 
 // Middleware
 app.use(express.json());
-app.use(express.static('public'));
+app.use(BASE_PATH, express.static('public'));
 
 // Logging utility
 function log(message, level = 'INFO') {
@@ -149,6 +150,13 @@ async function downloadAudio(url, sessionId, platform) {
       output: tempFileBase,
       noPlaylist: true
     });
+    
+    // Store process and temp file base in session for cleanup on disconnect
+    const session = activeSessions.get(sessionId);
+    if (session) {
+      session.ytDlpProcess = ytDlpProcess;
+      session.tempFileBase = tempFileBase;
+    }
 
     ytDlpProcess.stdout.on('data', (data) => {
       const output = data.toString();
@@ -292,7 +300,7 @@ async function downloadAudio(url, sessionId, platform) {
 }
 
 // SSE endpoint for progress updates
-app.get('/progress/:sessionId', (req, res) => {
+app.get(`${BASE_PATH}/progress/:sessionId`, (req, res) => {
   const { sessionId } = req.params;
   
   // Set headers for SSE
@@ -311,17 +319,48 @@ app.get('/progress/:sessionId', (req, res) => {
   
   // Clean up on client disconnect
   req.on('close', () => {
-    // Only remove the response object, keep the session for file download
     const session = activeSessions.get(sessionId);
     if (session) {
+      // Kill yt-dlp process if still running
+      if (session.ytDlpProcess) {
+        try {
+          session.ytDlpProcess.kill('SIGTERM');
+          log(`Killed yt-dlp process for disconnected session: ${sessionId}`, 'WARN');
+        } catch (err) {
+          log(`Error killing process: ${err.message}`, 'ERROR');
+        }
+      }
+      
+      // Clean up temp file if exists and download not completed
+      if (session.tempFileBase && !session.tempFile) {
+        const possibleFiles = [
+          session.tempFileBase,
+          `${session.tempFileBase}.mp3`,
+          `${session.tempFileBase}.webp`,
+          `${session.tempFileBase}.png`
+        ];
+        
+        possibleFiles.forEach(file => {
+          if (fs.existsSync(file)) {
+            try {
+              fs.unlinkSync(file);
+              log(`Cleaned up orphaned file: ${path.basename(file)}`, 'INFO');
+            } catch (err) {
+              log(`Error cleaning file: ${err.message}`, 'ERROR');
+            }
+          }
+        });
+      }
+      
       delete session.res;
+      delete session.ytDlpProcess;
     }
     log(`SSE connection closed for session: ${sessionId}`);
   });
 });
 
 // Download endpoint
-app.post('/download', async (req, res) => {
+app.post(`${BASE_PATH}/download`, async (req, res) => {
   const startTime = Date.now();
   const sessionId = Date.now().toString();
   let tempFile = null;
@@ -387,7 +426,7 @@ app.post('/download', async (req, res) => {
 });
 
 // File retrieval endpoint
-app.get('/file/:sessionId', (req, res) => {
+app.get(`${BASE_PATH}/file/:sessionId`, (req, res) => {
   const { sessionId } = req.params;
   const session = activeSessions.get(sessionId);
   
@@ -423,7 +462,7 @@ app.get('/file/:sessionId', (req, res) => {
 });
 
 // Thumbnail endpoint
-app.get('/thumbnail/:sessionId', (req, res) => {
+app.get(`${BASE_PATH}/thumbnail/:sessionId`, (req, res) => {
   const { sessionId } = req.params;
   const session = activeSessions.get(sessionId);
   
@@ -437,7 +476,7 @@ app.get('/thumbnail/:sessionId', (req, res) => {
 });
 
 // Health check endpoint
-app.get('/health', (req, res) => {
+app.get(`${BASE_PATH}/health`, (req, res) => {
   res.json({ status: 'ok', uptime: process.uptime() });
 });
 

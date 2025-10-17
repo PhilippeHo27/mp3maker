@@ -22,7 +22,7 @@ jobs:
         script: |
           cd ~/projects/mp3maker
           
-          # Pull latest code
+          # Pull latest changes or clone on first run
           if [ -d .git ]; then
             git pull origin main
           else
@@ -30,9 +30,9 @@ jobs:
           fi
           
           # Install dependencies
-          npm install
+          npm install --production
           
-          # Restart PM2 process
+          # Restart MP3Maker app using ecosystem config
           pm2 delete mp3maker || true
-          pm2 start server.js --name mp3maker
+          pm2 start ecosystem.config.js --env production
           pm2 save
