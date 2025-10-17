@@ -14,24 +14,8 @@ const clearLogsBtn = document.getElementById('clearLogs');
 
 let logEventSource = null;
 
-// Detect BASE_PATH from current URL
-const BASE_PATH = window.location.pathname.split('/').slice(0, -1).join('/') || '';
-
-// Keyboard shortcut: Ctrl+Alt+A to open admin panel
+// Escape key closes admin panel
 document.addEventListener('keydown', (event) => {
-  // Ctrl+Alt+A opens admin panel
-  if (event.ctrlKey && event.altKey && event.key === 'a') {
-    event.preventDefault();
-    adminModal.classList.toggle('active');
-    if (adminModal.classList.contains('active')) {
-      loadHealthStatus();
-      connectToLogs();
-    } else {
-      disconnectFromLogs();
-    }
-  }
-  
-  // Escape closes admin panel
   if (event.key === 'Escape' && adminModal.classList.contains('active')) {
     event.preventDefault();
     adminModal.classList.remove('active');
@@ -70,7 +54,7 @@ async function loadHealthStatus() {
   healthDisplay.innerHTML = '<div class="health-item">Loading...</div>';
   
   try {
-    const response = await fetch(`${BASE_PATH}/admin/health`);
+    const response = await fetch(`${window.BASE_PATH}/admin/health`);
     if (!response.ok) throw new Error('Failed to load health status');
     
     const data = await response.json();
@@ -117,7 +101,7 @@ updateCookiesBtn.addEventListener('click', async () => {
   updateCookiesBtn.textContent = 'Updating...';
   
   try {
-    const response = await fetch(`${BASE_PATH}/admin/update-cookies`, {
+    const response = await fetch(`${window.BASE_PATH}/admin/update-cookies`, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain' },
       body: cookieContent
@@ -161,7 +145,7 @@ function connectToLogs() {
   
   logsContainer.innerHTML = '<div class="log-line">Connecting to log stream...</div>';
   
-  logEventSource = new EventSource(`${BASE_PATH}/admin/logs`);
+  logEventSource = new EventSource(`${window.BASE_PATH}/admin/logs`);
   
   logEventSource.onmessage = (event) => {
     const log = JSON.parse(event.data);

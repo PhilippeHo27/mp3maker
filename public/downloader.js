@@ -19,7 +19,8 @@ let eventSource = null;
 let currentSessionId = null;
 
 // Detect BASE_PATH from current URL (e.g., /mp3maker in production, empty in dev)
-const BASE_PATH = window.location.pathname.split('/').slice(0, -1).join('/') || '';
+window.BASE_PATH = window.BASE_PATH || window.location.pathname.split('/').slice(0, -1).join('/') || '';
+const BASE_PATH = window.BASE_PATH;
 
 // Convert button click handler
 convertBtn.addEventListener('click', async () => {
