@@ -78,6 +78,24 @@ function sendProgress(sessionId, data) {
   }
 }
 
+// Wait for SSE connection to be established
+function waitForSSEConnection(sessionId, maxWaitMs = 5000) {
+  return new Promise((resolve) => {
+    const startTime = Date.now();
+    const checkInterval = setInterval(() => {
+      const session = activeSessions.get(sessionId);
+      if (session && session.res) {
+        clearInterval(checkInterval);
+        resolve(true);
+      } else if (Date.now() - startTime > maxWaitMs) {
+        clearInterval(checkInterval);
+        log(`SSE connection timeout for session: ${sessionId}`, 'WARN');
+        resolve(false);
+      }
+    }, 50);
+  });
+}
+
 // Unified download function using yt-dlp for both YouTube and SoundCloud
 async function downloadAudio(url, sessionId, platform) {
   // Use a simple filename without extension - yt-dlp will add .mp3
@@ -96,21 +114,48 @@ async function downloadAudio(url, sessionId, platform) {
     let exitCode = null;
     
     // First, get the video title
+    let countdownInterval;
     try {
+      log(`Starting info fetch for: ${url}`, 'INFO');
       sendProgress(sessionId, { 
         status: 'fetching', 
         percent: 2,
         message: '📡 Fetching video info...'
       });
       
-      const titleOutput = await ytDlp(url, {
-        dumpSingleJson: true,
-        noWarnings: true,
-        noCallHome: true,
-        noCheckCertificate: true,
-        preferFreeFormats: true,
-        youtubeSkipDashManifest: true
-      });
+      // Add countdown timer for info fetch
+      let countdown = 30;
+      countdownInterval = setInterval(() => {
+        countdown--;
+        if (countdown > 0) {
+          sendProgress(sessionId, { 
+            status: 'fetching', 
+            percent: 2 + ((30 - countdown) / 30 * 3),
+            message: `📡 Fetching video info... (${countdown}s)`
+          });
+        }
+      }, 1000);
+      
+      // Add timeout wrapper for info fetch
+      const infoClientStrategy = platform === 'youtube' 
+        ? 'youtube:player_client=ios,android'
+        : undefined;
+      
+      const titleOutput = await Promise.race([
+        ytDlp(url, {
+          dumpSingleJson: true,
+          noWarnings: true,
+          noCallHome: true,
+          noCheckCertificate: true,
+          ...(infoClientStrategy && { extractorArgs: infoClientStrategy })
+          // Use iOS/Android clients to bypass SABR streaming
+        }),
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Info fetch timeout after 30s')), 30000)
+        )
+      ]);
+      
+      if (countdownInterval) clearInterval(countdownInterval);
       
       if (titleOutput && titleOutput.title) {
         videoTitle = sanitizeFilename(titleOutput.title);
@@ -133,8 +178,11 @@ async function downloadAudio(url, sessionId, platform) {
           message: `✨ Found: ${videoTitle.substring(0, 40)}${videoTitle.length > 40 ? '...' : ''}`
         });
       }
+      log(`Info fetch completed successfully`, 'INFO');
     } catch (err) {
+      if (countdownInterval) clearInterval(countdownInterval);
       log(`Could not fetch title: ${err.message}`, 'WARN');
+      // Continue without title if fetch fails
     }
     
     sendProgress(sessionId, { 
@@ -143,17 +191,22 @@ async function downloadAudio(url, sessionId, platform) {
       message: '🎵 Preparing download...'
     });
     
+    // Try multiple client strategies to bypass SABR
+    const clientStrategy = platform === 'youtube' 
+      ? 'youtube:player_client=ios,android'  // iOS first, then Android fallback
+      : undefined;
+    
     const ytDlpProcess = ytDlp.exec(url, {
       extractAudio: true,
       audioFormat: 'mp3',
       audioQuality: '320k',
-      format: 'bestaudio',
+      format: 'bestaudio/best',
       addMetadata: true,
       embedThumbnail: true,
       output: tempFileBase,
       noPlaylist: true,
-      // Bypass YouTube bot detection with realistic user agent
-      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+      ...(clientStrategy && { extractorArgs: clientStrategy })
+      // iOS client bypasses SABR, Android as fallback
     });
     
     // Store process and temp file base in session for cleanup on disconnect
@@ -396,6 +449,9 @@ app.post(`${BASE_PATH}/download`, async (req, res) => {
     }
     activeSessions.get(sessionId).url = url;
     activeSessions.get(sessionId).platform = platform;
+    
+    // Wait for SSE connection to be established before starting download
+    await waitForSSEConnection(sessionId);
     
     // Download using unified yt-dlp function
     tempFile = await downloadAudio(url, sessionId, platform);
