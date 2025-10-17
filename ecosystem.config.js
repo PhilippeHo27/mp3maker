@@ -3,6 +3,8 @@ module.exports = {
   apps: [{
     name: 'mp3maker',
     script: './server.js',
+    cwd: '/home/phil/projects/mp3maker',
+    interpreter: '/usr/bin/node',
     env: {
       NODE_ENV: 'development',
       BASE_PATH: ''

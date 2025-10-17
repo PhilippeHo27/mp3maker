@@ -8,11 +8,11 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v3
-    
+
     - name: Deploy to server
       uses: appleboy/ssh-action@master
       with:
@@ -21,18 +21,23 @@ jobs:
         key: ${{ secrets.SSH_PRIVATE_KEY }}
         script: |
           cd ~/projects/mp3maker
-          
-          # Pull latest changes or clone on first run
+
+          # Pull the latest code
           if [ -d .git ]; then
             git pull origin main
           else
             git clone git@github.com:PhilippeHo27/mp3maker.git .
           fi
-          
+
+          # Ensure Python is installed (required for yt-dlp)
+          if ! command -v python3 &> /dev/null; then
+            sudo apt update && sudo apt install -y python3 python-is-python3
+          fi
+
           # Install dependencies
           npm install --production
-          
-          # Restart MP3Maker app using ecosystem config
+
+          # Restart app using PM2 ecosystem config
           pm2 delete mp3maker || true
           pm2 start ecosystem.config.js --env production
           pm2 save
