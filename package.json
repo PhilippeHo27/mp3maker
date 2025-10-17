@@ -1,0 +1,24 @@
+{
+  "name": "youtube-to-mp3-converter",
+  "version": "1.0.0",
+  "description": "A simple YouTube to MP3 converter with Express backend",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "youtube",
+    "mp3",
+    "converter",
+    "download"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^5.1.0",
+    "yt-dlp-exec": "^1.0.2"
+  }
+}

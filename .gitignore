@@ -1,0 +1,19 @@
+# Dependencies
+node_modules/
+
+# Audio files
+*.mp3
+
+# Temp files
+public/temp/
+
+# Environment variables
+.env
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
