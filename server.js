@@ -3,6 +3,9 @@ const ytDlp = require('yt-dlp-exec');
 const path = require('path');
 const fs = require('fs');
 
+// Use system yt-dlp if available (more up-to-date than bundled version)
+process.env.YTDL_PATH = process.env.YTDL_PATH || 'yt-dlp';
+
 const app = express();
 
 // Configuration
@@ -148,7 +151,9 @@ async function downloadAudio(url, sessionId, platform) {
       addMetadata: true,
       embedThumbnail: true,
       output: tempFileBase,
-      noPlaylist: true
+      noPlaylist: true,
+      // Bypass YouTube bot detection with realistic user agent
+      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     });
     
     // Store process and temp file base in session for cleanup on disconnect
