@@ -160,14 +160,19 @@ async function downloadAudio(url, sessionId, platform) {
         }
       }, 1000);
       
-      // Add timeout wrapper for info fetch
-      const infoClientStrategy = platform === 'youtube' 
-        ? 'youtube:player_client=ios,android'
-        : undefined;
-      
       // Check for cookies file
       const cookiePath = path.join(__dirname, 'cookies.txt');
       const hasCookies = fs.existsSync(cookiePath);
+      
+      // Strategy: Use iOS/Android clients WITHOUT cookies (bypasses SABR)
+      //           Use default web client WITH cookies (bypasses bot detection)
+      const infoClientStrategy = platform === 'youtube' && !hasCookies
+        ? 'youtube:player_client=ios,android'
+        : undefined;
+      
+      if (hasCookies) {
+        log('Using cookies.txt for info fetch', 'INFO');
+      }
       
       const titleOutput = await Promise.race([
         ytDlp(url, {
@@ -176,7 +181,7 @@ async function downloadAudio(url, sessionId, platform) {
           noCheckCertificate: true,
           ...(infoClientStrategy && { extractorArgs: infoClientStrategy }),
           ...(hasCookies && { cookies: cookiePath })
-          // Use iOS/Android clients + cookies to bypass bot detection
+          // iOS/Android for SABR bypass (no cookies) OR web client with cookies
         }),
         new Promise((_, reject) => 
           setTimeout(() => reject(new Error('Info fetch timeout after 30s')), 30000)
@@ -219,16 +224,20 @@ async function downloadAudio(url, sessionId, platform) {
       message: '🎵 Preparing download...'
     });
     
-    // Try multiple client strategies to bypass SABR
-    const clientStrategy = platform === 'youtube' 
-      ? 'youtube:player_client=ios,android'  // iOS first, then Android fallback
-      : undefined;
-    
     // Check for cookies file
     const cookiePath = path.join(__dirname, 'cookies.txt');
     const hasCookies = fs.existsSync(cookiePath);
+    
+    // Strategy: Use iOS/Android clients WITHOUT cookies (bypasses SABR)
+    //           Use default web client WITH cookies (bypasses bot detection)
+    const clientStrategy = platform === 'youtube' && !hasCookies
+      ? 'youtube:player_client=ios,android'
+      : undefined;
+    
     if (hasCookies) {
       log('Using cookies.txt for authentication', 'INFO');
+    } else if (clientStrategy) {
+      log('Using iOS/Android client (no cookies)', 'INFO');
     }
     
     const ytDlpProcess = ytDlp.exec(url, {
@@ -242,7 +251,7 @@ async function downloadAudio(url, sessionId, platform) {
       noPlaylist: true,
       ...(clientStrategy && { extractorArgs: clientStrategy }),
       ...(hasCookies && { cookies: cookiePath })
-      // iOS client + cookies bypass SABR and bot detection
+      // iOS/Android for SABR bypass (no cookies) OR web client with cookies
     });
     
     // Store process and temp file base in session for cleanup on disconnect
