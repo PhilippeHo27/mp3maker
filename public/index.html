@@ -170,9 +170,261 @@
     .error { background: #2a1a1a; color: #ff6b6b; }
     .success { background: #1a2a1a; color: #51cf66; }
     .loading { background: #1a1a2a; color: #74c0fc; }
+    
+    /* Admin button - hidden, use Ctrl+Shift+A to access */
+    .admin-btn {
+      display: none;
+    }
+    
+    /* Admin modal */
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.8);
+      z-index: 2000;
+      justify-content: center;
+      align-items: center;
+      padding: 20px;
+    }
+    .modal-overlay.active {
+      display: flex;
+    }
+    .modal {
+      background: #1a1a1a;
+      border: 1px solid #2a2a2a;
+      border-radius: 12px;
+      width: 100%;
+      max-width: 1200px;
+      max-height: 90vh;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+    .modal-content {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+    }
+    .modal-left {
+      flex: 0 0 450px;
+      padding: 24px;
+      overflow-y: auto;
+      border-right: 1px solid #2a2a2a;
+    }
+    .modal-right {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      background: #0a0a0a;
+    }
+    .logs-header {
+      padding: 16px 20px;
+      border-bottom: 1px solid #2a2a2a;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .logs-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: #888;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .logs-container {
+      flex: 1;
+      overflow-y: auto;
+      padding: 12px;
+      font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
+      font-size: 11px;
+      line-height: 1.5;
+      color: #ccc;
+    }
+    .log-line {
+      padding: 2px 0;
+      white-space: pre-wrap;
+      word-break: break-all;
+      user-select: text;
+    }
+    .log-line.INFO { color: #74c0fc; }
+    .log-line.SUCCESS { color: #51cf66; }
+    .log-line.WARN { color: #ffd43b; }
+    .log-line.ERROR { color: #ff6b6b; }
+    .clear-logs-btn {
+      padding: 6px 12px;
+      font-size: 12px;
+      background: #2a2a2a;
+      color: #888;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .clear-logs-btn:hover {
+      background: #3a3a3a;
+      color: #e0e0e0;
+    }
+    .modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 20px 24px;
+      border-bottom: 1px solid #2a2a2a;
+      flex-shrink: 0;
+    }
+    .modal-title {
+      font-size: 20px;
+      font-weight: 600;
+      color: #fff;
+    }
+    .modal-close {
+      background: none;
+      border: none;
+      color: #888;
+      font-size: 24px;
+      cursor: pointer;
+      padding: 0;
+      width: auto;
+      line-height: 1;
+      transition: color 0.2s;
+    }
+    .modal-close:hover {
+      color: #fff;
+    }
+    .health-section {
+      margin-bottom: 24px;
+      padding: 16px;
+      background: #0f0f0f;
+      border-radius: 8px;
+      border: 1px solid #2a2a2a;
+    }
+    .health-title {
+      font-size: 16px;
+      font-weight: 600;
+      margin-bottom: 12px;
+      color: #fff;
+    }
+    .health-item {
+      display: flex;
+      align-items: center;
+      padding: 8px 0;
+      color: #ccc;
+      font-size: 14px;
+    }
+    .health-icon {
+      margin-right: 8px;
+      font-size: 16px;
+    }
+    .refresh-btn {
+      width: auto;
+      padding: 8px 16px;
+      font-size: 13px;
+      margin-top: 12px;
+      background: #2a2a2a;
+      color: #e0e0e0;
+    }
+    .refresh-btn:hover {
+      background: #3a3a3a;
+    }
+    .cookie-section {
+      margin-bottom: 16px;
+    }
+    .cookie-textarea {
+      width: 100%;
+      min-height: 300px;
+      padding: 12px;
+      background: #0f0f0f;
+      border: 1px solid #2a2a2a;
+      border-radius: 8px;
+      color: #e0e0e0;
+      font-family: 'Monaco', 'Menlo', monospace;
+      font-size: 12px;
+      resize: vertical;
+      outline: none;
+      margin-bottom: 12px;
+    }
+    .cookie-textarea:focus {
+      border-color: #4a4a4a;
+    }
+    .update-cookies-btn {
+      width: 100%;
+      padding: 12px;
+      background: #51cf66;
+      color: #0a0a0a;
+      font-weight: 600;
+    }
+    .update-cookies-btn:hover {
+      background: #40c057;
+    }
+    .update-cookies-btn:disabled {
+      background: #2a2a2a;
+      color: #666;
+    }
+    .modal-status {
+      padding: 12px;
+      border-radius: 6px;
+      margin-top: 12px;
+      font-size: 13px;
+      text-align: center;
+      display: none;
+    }
+    .modal-status.active {
+      display: block;
+    }
   </style>
 </head>
 <body>
+  <!-- Admin button -->
+  <button class="admin-btn" id="adminBtn">Admin</button>
+  
+  <!-- Admin modal -->
+  <div class="modal-overlay" id="adminModal">
+    <div class="modal">
+      <div class="modal-header">
+        <div class="modal-title">MP3Maker Admin Panel</div>
+        <button class="modal-close" id="closeModal">&times;</button>
+      </div>
+      
+      <div class="modal-content">
+        <!-- Left side: Cookies & Health -->
+        <div class="modal-left">
+          <div class="health-section">
+            <div class="health-title">System Status</div>
+            <div id="healthDisplay">
+              <div class="health-item">Loading...</div>
+            </div>
+            <button class="refresh-btn" id="refreshHealth">Refresh Status</button>
+          </div>
+          
+          <div class="cookie-section">
+            <div class="health-title">Update YouTube Cookies</div>
+            <textarea 
+              id="cookieTextarea" 
+              class="cookie-textarea" 
+              placeholder="Paste cookies.txt content here&#10;&#10;# Netscape HTTP Cookie File&#10;.youtube.com	TRUE	/	..."></textarea>
+            <button class="update-cookies-btn" id="updateCookiesBtn">Update Cookies</button>
+            <div id="modalStatus" class="modal-status"></div>
+          </div>
+        </div>
+        
+        <!-- Right side: Real-time Logs -->
+        <div class="modal-right">
+          <div class="logs-header">
+            <div class="logs-title">Server Logs (Live)</div>
+            <button class="clear-logs-btn" id="clearLogs">Clear</button>
+          </div>
+          <div class="logs-container" id="logsContainer">
+            <div class="log-line">Connecting to log stream...</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  
   <div class="container">
     <input type="text" id="url" placeholder="Paste YouTube, SoundCloud or Bandcamp URL">
     <button id="download">Convert</button>
@@ -431,6 +683,215 @@
       if (eventSource) {
         eventSource.close();
       }
+    });
+
+    // ===== ADMIN PANEL FUNCTIONALITY =====
+    
+    const adminBtn = document.getElementById('adminBtn');
+    const adminModal = document.getElementById('adminModal');
+    const closeModal = document.getElementById('closeModal');
+    const refreshHealth = document.getElementById('refreshHealth');
+    const healthDisplay = document.getElementById('healthDisplay');
+    const cookieTextarea = document.getElementById('cookieTextarea');
+    const updateCookiesBtn = document.getElementById('updateCookiesBtn');
+    const modalStatus = document.getElementById('modalStatus');
+    const logsContainer = document.getElementById('logsContainer');
+    const clearLogsBtn = document.getElementById('clearLogs');
+    
+    let logEventSource = null;
+
+    // Keyboard shortcut: Ctrl+Shift+A to open admin panel
+    document.addEventListener('keydown', (event) => {
+      // Ctrl+Shift+A opens admin panel
+      if (event.ctrlKey && event.shiftKey && event.key === 'A') {
+        event.preventDefault();
+        adminModal.classList.toggle('active');
+        if (adminModal.classList.contains('active')) {
+          loadHealthStatus();
+          connectToLogs();
+        } else {
+          disconnectFromLogs();
+        }
+      }
+      
+      // Escape closes admin panel
+      if (event.key === 'Escape' && adminModal.classList.contains('active')) {
+        event.preventDefault();
+        adminModal.classList.remove('active');
+        disconnectFromLogs();
+      }
+    });
+
+    // Open admin modal (for button if needed)
+    adminBtn.addEventListener('click', () => {
+      adminModal.classList.add('active');
+      loadHealthStatus();
+      connectToLogs();
+    });
+
+    // Close modal
+    closeModal.addEventListener('click', () => {
+      adminModal.classList.remove('active');
+      disconnectFromLogs();
+    });
+
+    // Close modal when clicking outside
+    adminModal.addEventListener('click', (e) => {
+      if (e.target === adminModal) {
+        adminModal.classList.remove('active');
+        disconnectFromLogs();
+      }
+    });
+
+    // Refresh health status
+    refreshHealth.addEventListener('click', () => {
+      loadHealthStatus();
+    });
+
+    // Load health status
+    async function loadHealthStatus() {
+      healthDisplay.innerHTML = '<div class="health-item">Loading...</div>';
+      
+      try {
+        const response = await fetch(`${BASE_PATH}/admin/health`);
+        if (!response.ok) throw new Error('Failed to load health status');
+        
+        const data = await response.json();
+        
+        let html = '';
+        
+        // Cookies status
+        if (data.cookies.exists) {
+          const age = data.cookies.ageInDays;
+          const icon = age < 30 ? '✅' : age < 60 ? '⚠️' : '❌';
+          html += `<div class="health-item"><span class="health-icon">${icon}</span> Cookies: Present (${age} days old)</div>`;
+        } else {
+          html += '<div class="health-item"><span class="health-icon">❌</span> Cookies: Not found</div>';
+        }
+        
+        // yt-dlp version
+        html += `<div class="health-item"><span class="health-icon">✅</span> yt-dlp: ${data.ytdlp.version}</div>`;
+        
+        // Server uptime
+        const uptimeHours = Math.floor(data.server.uptimeSeconds / 3600);
+        const uptimeDays = Math.floor(uptimeHours / 24);
+        const remainingHours = uptimeHours % 24;
+        const uptimeStr = uptimeDays > 0 
+          ? `${uptimeDays} days, ${remainingHours} hours`
+          : `${uptimeHours} hours`;
+        html += `<div class="health-item"><span class="health-icon">✅</span> Server uptime: ${uptimeStr}</div>`;
+        
+        healthDisplay.innerHTML = html;
+      } catch (error) {
+        healthDisplay.innerHTML = `<div class="health-item"><span class="health-icon">❌</span> Error: ${error.message}</div>`;
+      }
+    }
+
+    // Update cookies
+    updateCookiesBtn.addEventListener('click', async () => {
+      const cookieContent = cookieTextarea.value.trim();
+      
+      if (!cookieContent) {
+        showModalStatus('Please paste cookie content', 'error');
+        return;
+      }
+      
+      updateCookiesBtn.disabled = true;
+      updateCookiesBtn.textContent = 'Updating...';
+      
+      try {
+        const response = await fetch(`${BASE_PATH}/admin/update-cookies`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain' },
+          body: cookieContent
+        });
+        
+        const result = await response.json();
+        
+        if (!response.ok || !result.success) {
+          throw new Error(result.error || 'Failed to update cookies');
+        }
+        
+        showModalStatus('✅ Cookies updated successfully!', 'success');
+        cookieTextarea.value = '';
+        
+        // Refresh health status
+        setTimeout(() => loadHealthStatus(), 500);
+        
+      } catch (error) {
+        showModalStatus(`❌ Error: ${error.message}`, 'error');
+      } finally {
+        updateCookiesBtn.disabled = false;
+        updateCookiesBtn.textContent = 'Update Cookies';
+      }
+    });
+
+    // Show modal status message
+    function showModalStatus(message, type) {
+      modalStatus.textContent = message;
+      modalStatus.className = `modal-status ${type} active`;
+      
+      setTimeout(() => {
+        modalStatus.classList.remove('active');
+      }, 5000);
+    }
+
+    // ===== LOG VIEWER FUNCTIONALITY =====
+
+    // Connect to log stream
+    function connectToLogs() {
+      if (logEventSource) return; // Already connected
+      
+      logsContainer.innerHTML = '<div class="log-line">Connecting to log stream...</div>';
+      
+      logEventSource = new EventSource(`${BASE_PATH}/admin/logs`);
+      
+      logEventSource.onmessage = (event) => {
+        const log = JSON.parse(event.data);
+        addLogLine(log);
+      };
+      
+      logEventSource.onerror = () => {
+        if (logsContainer.children.length === 0) {
+          logsContainer.innerHTML = '<div class="log-line ERROR">Connection failed</div>';
+        }
+      };
+    }
+
+    // Disconnect from log stream
+    function disconnectFromLogs() {
+      if (logEventSource) {
+        logEventSource.close();
+        logEventSource = null;
+      }
+    }
+
+    // Add a log line to the display
+    function addLogLine(log) {
+      // Clear "connecting" message on first real log
+      if (logsContainer.children.length === 1 && 
+          logsContainer.children[0].textContent.includes('Connecting')) {
+        logsContainer.innerHTML = '';
+      }
+      
+      const logLine = document.createElement('div');
+      logLine.className = `log-line ${log.level}`;
+      logLine.textContent = log.full;
+      
+      logsContainer.appendChild(logLine);
+      
+      // Auto-scroll to bottom
+      logsContainer.scrollTop = logsContainer.scrollHeight;
+      
+      // Limit to 500 lines in UI
+      while (logsContainer.children.length > 500) {
+        logsContainer.removeChild(logsContainer.firstChild);
+      }
+    }
+
+    // Clear logs display
+    clearLogsBtn.addEventListener('click', () => {
+      logsContainer.innerHTML = '<div class="log-line">Logs cleared (new logs will appear below)</div>';
     });
   </script>
 </body>

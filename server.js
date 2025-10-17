@@ -2,6 +2,7 @@ const express = require('express');
 const ytDlp = require('yt-dlp-exec');
 const path = require('path');
 const fs = require('fs');
+const { execSync } = require('child_process');
 
 // Use system yt-dlp if available (more up-to-date than bundled version)
 process.env.YTDL_PATH = process.env.YTDL_PATH || 'yt-dlp';
@@ -15,14 +16,37 @@ const BASE_PATH = process.env.BASE_PATH || ''; // Empty for local, '/mp3maker' f
 // Store active download sessions
 const activeSessions = new Map();
 
+// Store log history (keep last 500 lines)
+const logHistory = [];
+const MAX_LOG_HISTORY = 500;
+const logClients = new Set();
+
 // Middleware
 app.use(express.json());
+app.use(express.text({ limit: '1mb' })); // For cookie file uploads
 app.use(BASE_PATH, express.static('public'));
 
 // Logging utility
 function log(message, level = 'INFO') {
   const timestamp = new Date().toISOString();
-  console.log(`[${timestamp}] [${level}] ${message}`);
+  const logLine = `[${timestamp}] [${level}] ${message}`;
+  console.log(logLine);
+  
+  // Store in history
+  logHistory.push({ timestamp, level, message, full: logLine });
+  if (logHistory.length > MAX_LOG_HISTORY) {
+    logHistory.shift(); // Remove oldest
+  }
+  
+  // Broadcast to all log viewers
+  const data = JSON.stringify({ timestamp, level, message, full: logLine });
+  logClients.forEach(client => {
+    try {
+      client.write(`data: ${data}\n\n`);
+    } catch (err) {
+      logClients.delete(client);
+    }
+  });
 }
 
 // Detect platform from URL using regex
@@ -141,14 +165,18 @@ async function downloadAudio(url, sessionId, platform) {
         ? 'youtube:player_client=ios,android'
         : undefined;
       
+      // Check for cookies file
+      const cookiePath = path.join(__dirname, 'cookies.txt');
+      const hasCookies = fs.existsSync(cookiePath);
+      
       const titleOutput = await Promise.race([
         ytDlp(url, {
           dumpSingleJson: true,
           noWarnings: true,
-          noCallHome: true,
           noCheckCertificate: true,
-          ...(infoClientStrategy && { extractorArgs: infoClientStrategy })
-          // Use iOS/Android clients to bypass SABR streaming
+          ...(infoClientStrategy && { extractorArgs: infoClientStrategy }),
+          ...(hasCookies && { cookies: cookiePath })
+          // Use iOS/Android clients + cookies to bypass bot detection
         }),
         new Promise((_, reject) => 
           setTimeout(() => reject(new Error('Info fetch timeout after 30s')), 30000)
@@ -196,6 +224,13 @@ async function downloadAudio(url, sessionId, platform) {
       ? 'youtube:player_client=ios,android'  // iOS first, then Android fallback
       : undefined;
     
+    // Check for cookies file
+    const cookiePath = path.join(__dirname, 'cookies.txt');
+    const hasCookies = fs.existsSync(cookiePath);
+    if (hasCookies) {
+      log('Using cookies.txt for authentication', 'INFO');
+    }
+    
     const ytDlpProcess = ytDlp.exec(url, {
       extractAudio: true,
       audioFormat: 'mp3',
@@ -205,8 +240,9 @@ async function downloadAudio(url, sessionId, platform) {
       embedThumbnail: true,
       output: tempFileBase,
       noPlaylist: true,
-      ...(clientStrategy && { extractorArgs: clientStrategy })
-      // iOS client bypasses SABR, Android as fallback
+      ...(clientStrategy && { extractorArgs: clientStrategy }),
+      ...(hasCookies && { cookies: cookiePath })
+      // iOS client + cookies bypass SABR and bot detection
     });
     
     // Store process and temp file base in session for cleanup on disconnect
@@ -539,6 +575,96 @@ app.get(`${BASE_PATH}/thumbnail/:sessionId`, (req, res) => {
 // Health check endpoint
 app.get(`${BASE_PATH}/health`, (req, res) => {
   res.json({ status: 'ok', uptime: process.uptime() });
+});
+
+// Admin: Health check endpoint
+// TODO: Add authentication in production
+app.get(`${BASE_PATH}/admin/health`, async (req, res) => {
+  try {
+    const cookiePath = path.join(__dirname, 'cookies.txt');
+    const exists = fs.existsSync(cookiePath);
+    let ageInDays = null;
+    
+    if (exists) {
+      const stats = fs.statSync(cookiePath);
+      const ageMs = Date.now() - stats.mtimeMs;
+      ageInDays = Math.round(ageMs / (1000 * 60 * 60 * 24));
+    }
+    
+    let ytdlpVersion = 'unknown';
+    try {
+      ytdlpVersion = execSync('yt-dlp --version', { encoding: 'utf8' }).trim();
+    } catch (err) {
+      log(`Could not get yt-dlp version: ${err.message}`, 'WARN');
+    }
+    
+    res.json({
+      cookies: {
+        exists,
+        ageInDays
+      },
+      ytdlp: {
+        version: ytdlpVersion
+      },
+      server: {
+        uptimeSeconds: Math.round(process.uptime())
+      }
+    });
+  } catch (error) {
+    log(`Admin health check error: ${error.message}`, 'ERROR');
+    res.status(500).json({ error: 'Failed to get health status' });
+  }
+});
+
+// Admin: Update cookies endpoint
+// TODO: Add authentication in production
+app.post(`${BASE_PATH}/admin/update-cookies`, (req, res) => {
+  try {
+    const cookiePath = path.join(__dirname, 'cookies.txt');
+    const cookieContent = typeof req.body === 'string' ? req.body : JSON.parse(req.body).cookieText;
+    
+    if (!cookieContent || cookieContent.trim().length === 0) {
+      return res.status(400).json({ success: false, error: 'Cookie content is empty' });
+    }
+    
+    // Write cookie file with restricted permissions
+    fs.writeFileSync(cookiePath, cookieContent, { mode: 0o600 });
+    log('Cookies updated via admin panel', 'SUCCESS');
+    
+    res.json({ 
+      success: true, 
+      message: 'Cookies updated successfully',
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    log(`Failed to update cookies: ${error.message}`, 'ERROR');
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Admin: Real-time logs endpoint (SSE)
+// TODO: Add authentication in production
+app.get(`${BASE_PATH}/admin/logs`, (req, res) => {
+  // Set headers for SSE
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  
+  // Send log history first
+  logHistory.forEach(entry => {
+    const data = JSON.stringify(entry);
+    res.write(`data: ${data}\n\n`);
+  });
+  
+  // Add client to set for future logs
+  logClients.add(res);
+  log(`Admin log viewer connected (${logClients.size} active)`, 'INFO');
+  
+  // Clean up on disconnect
+  req.on('close', () => {
+    logClients.delete(res);
+    log(`Admin log viewer disconnected (${logClients.size} active)`, 'INFO');
+  });
 });
 
 // Clean up orphaned temp files on startup
