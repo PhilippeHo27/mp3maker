@@ -17,10 +17,10 @@ let logEventSource = null;
 // Detect BASE_PATH from current URL
 const BASE_PATH = window.location.pathname.split('/').slice(0, -1).join('/') || '';
 
-// Keyboard shortcut: Ctrl+Shift+A to open admin panel
+// Keyboard shortcut: Ctrl+Alt+A to open admin panel
 document.addEventListener('keydown', (event) => {
-  // Ctrl+Shift+A opens admin panel
-  if (event.ctrlKey && event.shiftKey && event.key === 'A') {
+  // Ctrl+Alt+A opens admin panel
+  if (event.ctrlKey && event.altKey && event.key === 'a') {
     event.preventDefault();
     adminModal.classList.toggle('active');
     if (adminModal.classList.contains('active')) {

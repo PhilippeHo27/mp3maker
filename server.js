@@ -12,6 +12,7 @@ const app = express();
 // Configuration
 const PORT = process.env.PORT || 3003;
 const BASE_PATH = process.env.BASE_PATH || ''; // Empty for local, '/mp3maker' for production
+const IS_PRODUCTION = process.env.NODE_ENV === 'production' || BASE_PATH !== '';
 
 // Store active download sessions
 const activeSessions = new Map();
@@ -160,18 +161,24 @@ async function downloadAudio(url, sessionId, platform) {
         }
       }, 1000);
       
-      // Check for cookies file
+      // Check for cookies file (only in production)
       const cookiePath = path.join(__dirname, 'cookies.txt');
-      const hasCookies = fs.existsSync(cookiePath);
+      const hasCookies = IS_PRODUCTION && fs.existsSync(cookiePath);
       
-      // Strategy: Use iOS/Android clients WITHOUT cookies (bypasses SABR)
-      //           Use default web client WITH cookies (bypasses bot detection)
-      const infoClientStrategy = platform === 'youtube' && !hasCookies
+      // Strategy: 
+      // - Local: No special options (fastest, works perfectly)
+      // - Production with cookies: Use web client with cookies (bypasses bot detection)
+      // - Production without cookies: Use iOS/Android (bypasses SABR)
+      const infoClientStrategy = IS_PRODUCTION && platform === 'youtube' && !hasCookies
         ? 'youtube:player_client=ios,android'
         : undefined;
       
       if (hasCookies) {
-        log('Using cookies.txt for info fetch', 'INFO');
+        log('Using cookies.txt for info fetch (production)', 'INFO');
+      } else if (infoClientStrategy) {
+        log('Using iOS/Android client for info fetch (production, no cookies)', 'INFO');
+      } else if (!IS_PRODUCTION) {
+        log('Using default yt-dlp (local)', 'INFO');
       }
       
       const titleOutput = await Promise.race([
@@ -181,7 +188,7 @@ async function downloadAudio(url, sessionId, platform) {
           noCheckCertificate: true,
           ...(infoClientStrategy && { extractorArgs: infoClientStrategy }),
           ...(hasCookies && { cookies: cookiePath })
-          // iOS/Android for SABR bypass (no cookies) OR web client with cookies
+          // Local: raw yt-dlp | Production: iOS/Android or web+cookies
         }),
         new Promise((_, reject) => 
           setTimeout(() => reject(new Error('Info fetch timeout after 30s')), 30000)
@@ -224,20 +231,24 @@ async function downloadAudio(url, sessionId, platform) {
       message: '🎵 Preparing download...'
     });
     
-    // Check for cookies file
+    // Check for cookies file (only in production)
     const cookiePath = path.join(__dirname, 'cookies.txt');
-    const hasCookies = fs.existsSync(cookiePath);
+    const hasCookies = IS_PRODUCTION && fs.existsSync(cookiePath);
     
-    // Strategy: Use iOS/Android clients WITHOUT cookies (bypasses SABR)
-    //           Use default web client WITH cookies (bypasses bot detection)
-    const clientStrategy = platform === 'youtube' && !hasCookies
+    // Strategy: 
+    // - Local: No special options (fastest, works perfectly)
+    // - Production with cookies: Use web client with cookies (bypasses bot detection)
+    // - Production without cookies: Use iOS/Android (bypasses SABR)
+    const clientStrategy = IS_PRODUCTION && platform === 'youtube' && !hasCookies
       ? 'youtube:player_client=ios,android'
       : undefined;
     
     if (hasCookies) {
-      log('Using cookies.txt for authentication', 'INFO');
+      log('Using cookies.txt for authentication (production)', 'INFO');
     } else if (clientStrategy) {
-      log('Using iOS/Android client (no cookies)', 'INFO');
+      log('Using iOS/Android client (production, no cookies)', 'INFO');
+    } else if (!IS_PRODUCTION) {
+      log('Using default yt-dlp (local)', 'INFO');
     }
     
     const ytDlpProcess = ytDlp.exec(url, {
@@ -251,7 +262,7 @@ async function downloadAudio(url, sessionId, platform) {
       noPlaylist: true,
       ...(clientStrategy && { extractorArgs: clientStrategy }),
       ...(hasCookies && { cookies: cookiePath })
-      // iOS/Android for SABR bypass (no cookies) OR web client with cookies
+      // Local: raw yt-dlp | Production: iOS/Android or web+cookies
     });
     
     // Store process and temp file base in session for cleanup on disconnect
