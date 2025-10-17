@@ -219,6 +219,9 @@
 
     let eventSource = null;
     let currentSessionId = null;
+    
+    // Detect BASE_PATH from current URL (e.g., /mp3maker in production, empty in dev)
+    const BASE_PATH = window.location.pathname.split('/').slice(0, -1).join('/') || '';
 
     convertBtn.addEventListener('click', async () => {
       const url = urlInput.value.trim();
@@ -239,7 +242,7 @@
 
       try {
         // Start download
-        const response = await fetch('/download', {
+        const response = await fetch(`${BASE_PATH}/download`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ url })
@@ -261,7 +264,7 @@
       } catch (error) {
         hideProgress();
         showStatus(error.message, 'error');
-        downloadBtn.disabled = false;
+        convertBtn.disabled = false;
       }
     });
 
@@ -272,7 +275,7 @@
       }
 
       // Create new SSE connection
-      eventSource = new EventSource(`/progress/${sessionId}`);
+      eventSource = new EventSource(`${BASE_PATH}/progress/${sessionId}`);
 
       eventSource.onmessage = (event) => {
         const data = JSON.parse(event.data);
@@ -405,7 +408,7 @@
 
     async function fetchThumbnail(sessionId) {
       try {
-        const response = await fetch(`/thumbnail/${sessionId}`);
+        const response = await fetch(`${BASE_PATH}/thumbnail/${sessionId}`);
         if (response.ok) {
           const data = await response.json();
           thumbnailImage.src = data.thumbnailUrl;
