@@ -4,6 +4,11 @@
 - Branch `codex/cloudflare-access`; clean baseline passes 17 JavaScript tests. PRs #3 and #4 already merged.
 - Cloudflare API access works through the installed plugin. Private Portal has one exact owner email and no account-level groups exist. Shared group starts with that member; friends' addresses have not been supplied.
 - Design and execution steps: `docs/implementation/access-control-plan.md`. Work is inline, no subagents.
+- Plan committed first as `d85a68e`. Test-first evidence: unauthenticated HTML returned 200 instead of expected 403 before the middleware existed. After implementation: 24 JavaScript tests and 14 Python tests pass; npm install audit reports zero known vulnerabilities.
+- Created MP3 Maker Access app `6f04a1dc-6b16-4fdb-99da-706b800c5ad9`, AUD `e24a09269c6895e99ed260e86ab983b062dd21875e0b4c1304b5bcc92948a1e5`. It covers the existing apex path, uses Google + independent TOTP, 24h app sessions, and path-scoped HttpOnly/binding cookies. No DNS changes.
+- Created `Private Portal members` group `f3fa84f5-6f0b-4421-8480-d67ea07b83d6` from the existing owner email. Both app policies reference it, verified by readback. Hungry Dogs' other settings remain unchanged. No friends' exact addresses supplied yet.
+- Live Coolify inspection confirms RAW Compose on, auto-deploy off, Strip Prefix off, production platforms unchanged. Saved pre-change raw Compose locally under the desktop profile `.config/coolify/backups/mp3maker-access/compose-before.yaml`.
+- Found a pre-existing temporary-rig discrepancy: desktop `mp3-prod-worker` is on `mp3-feasibility-edge` with `internal=false`, so the network does not enforce proxy-only egress. Requested a separate decision on repairing its attachment after Access; no desktop startup/Tailscale work begun.
 
 Approved spec: user plan in conversation, 2026-09-04.
 Tasks: (1) worker feasibility; (2) durable API; (3) public UI; (4) integration, security review, deployment.
