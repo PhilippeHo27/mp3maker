@@ -17,3 +17,9 @@ Thumbs.db
 # Logs
 *.log
 npm-debug.log*
+
+runtime/
+__pycache__/
+*.pyc
+.playwright*/
+artifacts/

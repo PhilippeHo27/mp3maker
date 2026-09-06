@@ -1,67 +1,39 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
   <title>MP3 Maker</title>
   <link rel="stylesheet" href="styles.css">
   <script src="config.js"></script>
   <script src="background.js" defer></script>
   <script src="downloader.js" defer></script>
-  <script src="admin.js" defer></script>
 </head>
 <body>
-  <button class="admin-btn" id="adminBtn">⚙</button>
-
-  <div class="modal-overlay" id="adminModal">
-    <div class="modal">
-      <div class="modal-header">
-        <div class="modal-title">Server Console</div>
-        <button class="modal-close" id="closeModal">&times;</button>
-      </div>
-
-      <div class="modal-content-logs">
-        <div class="admin-health-panel">
-          <div class="admin-health-title">System Status</div>
-          <div class="admin-health-display" id="adminHealthDisplay">
-            <div class="health-item">Loading...</div>
-          </div>
-        </div>
-
-        <div class="logs-header">
-          <div class="logs-title">Real-time Server Logs</div>
-          <button class="clear-logs-btn" id="clearLogs">Clear</button>
-        </div>
-        <div class="logs-container" id="logsContainer">
-          <div class="log-line">Connecting to log stream...</div>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <div class="container">
-    <input type="text" id="url" placeholder="Paste SoundCloud or Bandcamp URL">
-    <button id="download">Convert</button>
-
-    <div class="progress-container" id="progressContainer">
-      <div class="status-text" id="statusText">Initializing...</div>
-      <div class="progress-bar-wrapper">
-        <div class="progress-bar" id="progressBar"></div>
-      </div>
-      <div class="progress-details">
-        <span id="progressPercent">0%</span>
-        <span id="progressSpeed"></span>
-        <span id="progressEta"></span>
-      </div>
-    </div>
-
-    <div id="status" class="status"></div>
-
-    <div class="thumbnail-container" id="thumbnailContainer">
-      <img id="thumbnailImage" src="" alt="Video thumbnail">
-      <div class="thumbnail-title" id="thumbnailTitle"></div>
-    </div>
-
-    <button id="downloadReady" style="display: none; margin-top: 20px; background: #51cf66;">Download MP3</button>
-  </div>
+  <main class="container">
+    <h1>MP3 Maker</h1>
+    <p class="intro" id="limits">Single tracks up to 15 minutes · MP3 at 192 kbps</p>
+    <ul class="platforms" id="platforms" aria-label="Platform availability">
+      <li>Checking YouTube, SoundCloud and Bandcamp availability…</li>
+    </ul>
+    <form id="convertForm">
+      <label for="url">Track URL</label>
+      <input type="url" id="url" name="url" required autocomplete="off" spellcheck="false" placeholder="Paste a track link" aria-describedby="limits">
+      <button id="download" type="submit">Convert</button>
+    </form>
+    <section class="progress-container" id="progressContainer" aria-label="Conversion status" hidden>
+      <p class="track-title" id="trackTitle"></p>
+      <div class="status-text" id="statusText" role="status" aria-live="polite" aria-atomic="true"></div>
+      <progress id="progressBar" max="100" value="0" aria-label="Conversion progress"></progress>
+      <p class="progress-details" id="progressPercent"></p>
+      <p class="helper">You can refresh this page. Conversion continues until you cancel.</p>
+      <button id="cancel" class="secondary" type="button" hidden>Cancel conversion</button>
+    </section>
+    <p id="status" class="status" role="status" aria-live="polite" aria-atomic="true"></p>
+    <button id="downloadReady" class="download-ready" type="button" hidden>Download MP3</button>
+    <p class="helper" id="retention" hidden>Available for one hour after conversion. You can download again during that time.</p>
+    <noscript><p class="status error active">Enable JavaScript to convert a track and follow its progress.</p></noscript>
+  </main>
 </body>
 </html>

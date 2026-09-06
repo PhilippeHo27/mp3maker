@@ -1,723 +1,193 @@
 const express = require('express');
-const ytDlpExec = require('yt-dlp-exec');
-const path = require('path');
-const fs = require('fs');
-const { execFileSync, spawnSync } = require('child_process');
+const fs = require('node:fs');
+const path = require('node:path');
+const { pipeline } = require('node:stream/promises');
+const { Transform } = require('node:stream');
+const { Store, ACTIVE, TERMINAL, MESSAGES, hash, random } = require('./lib/store');
+const { canonicalize } = require('./lib/url');
+const PLATFORMS = ['youtube', 'soundcloud', 'bandcamp'];
+const MAX_BYTES = 150 * 1024 * 1024;
+const safeTitle = value => typeof value === 'string' ? value.replace(/[\u0000-\u001f\u007f]/g, '').slice(0, 200) : '';
 
-const YTDLP_COMMAND = process.env.YTDLP_BIN || process.env.YTDL_PATH || 'yt-dlp';
-const ytDlp = typeof ytDlpExec.create === 'function'
-  ? ytDlpExec.create(YTDLP_COMMAND)
-  : ytDlpExec;
-
-// Set ffmpeg location for yt-dlp (Windows winget install location)
-// On Linux, ffmpeg should be in system PATH
-if (process.env.LOCALAPPDATA) {
-  const ffmpegPath = path.join(process.env.LOCALAPPDATA, 'Microsoft', 'WinGet', 'Packages', 'Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe', 'ffmpeg-8.0-full_build', 'bin');
-  if (fs.existsSync(path.join(ffmpegPath, 'ffmpeg.exe'))) {
-    process.env.FFMPEG_PATH = ffmpegPath;
+function createApps(options = {}) {
+  const now = options.now || Date.now;
+  const base = options.basePath ?? process.env.BASE_PATH ?? '';
+  if (base && !/^\/[a-zA-Z0-9/_-]+$/.test(base)) throw new Error('Invalid BASE_PATH');
+  const enabled = options.enabledPlatforms || (process.env.ENABLED_PLATFORMS || '').split(',').filter(Boolean);
+  const tokens = options.workerTokens || JSON.parse(process.env.WORKER_TOKENS || '{}');
+  const assignments = options.workerAssignments || JSON.parse(process.env.WORKER_ASSIGNMENTS || '{}');
+  for (const [id, token] of Object.entries(tokens)) {
+    if (!/^[a-zA-Z0-9_-]{1,64}$/.test(id) || typeof token !== 'string' || token.length < 32) throw new Error('Invalid worker configuration');
   }
-}
-
-const app = express();
-
-// Configuration
-const PORT = process.env.PORT || 3003;
-const BASE_PATH = process.env.BASE_PATH || ''; // Empty for local, '/mp3maker' for production
-const YOUTUBE_URL_PATTERN = /(?:youtube\.com|youtu\.be)/i;
-const SOUNDCLOUD_URL_PATTERN = /soundcloud\.com/i;
-const BANDCAMP_URL_PATTERN = /bandcamp\.com/i;
-const SUPPORTED_PLATFORMS = Object.freeze(['soundcloud', 'bandcamp']);
-const PLATFORM_LABELS = Object.freeze({
-  soundcloud: 'SoundCloud',
-  bandcamp: 'Bandcamp'
-});
-const YTDLP_STRATEGIES = Object.freeze({
-  soundcloud: 'standard system yt-dlp extraction',
-  bandcamp: 'standard system yt-dlp extraction',
-  unknown: 'standard system yt-dlp extraction'
-});
-
-// Store active download sessions
-const activeSessions = new Map();
-
-// Store log history (keep last 500 lines)
-const logHistory = [];
-const MAX_LOG_HISTORY = 500;
-const logClients = new Set();
-
-// Middleware
-app.use(express.json());
-app.use(BASE_PATH, express.static('public'));
-
-// Logging utility
-function log(message, level = 'INFO') {
-  const timestamp = new Date().toISOString();
-  const logLine = `[${timestamp}] [${level}] ${message}`;
-  console.log(logLine);
-
-  // Store in history
-  logHistory.push({ timestamp, level, message, full: logLine });
-  if (logHistory.length > MAX_LOG_HISTORY) {
-    logHistory.shift();
+  const store = new Store({ dataDir: options.dataDir || process.env.DATA_DIR || path.join(__dirname, 'runtime'), now });
+  const publicApp = express(), internalApp = express();
+  const workers = new Map(), streams = new Map(), uploads = new Map();
+  let closed = false;
+  publicApp.disable('x-powered-by'); internalApp.disable('x-powered-by');
+  const trust = options.trustProxy ?? process.env.TRUST_PROXY;
+  publicApp.set('trust proxy', trust ? String(trust).split(',').map(s => s.trim()) : false);
+  publicApp.use((req, res, next) => {
+    res.set({ 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer',
+      'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'" });
+    next();
+  });
+  publicApp.use(express.json({ limit: '4kb' }));
+  function status(platform) {
+    const online = [...workers.values()].some(w => now() - w.seen < 35000 && w.platforms.includes(platform));
+    if (!enabled.includes(platform)) return { available: false, reason: 'Not yet available' };
+    if (store.blocked(platform)) return { available: false, reason: 'Source temporarily blocking requests' };
+    return { available: online, reason: online ? null : 'Conversion worker offline' };
   }
+  function notify(j) {
+    for (const res of streams.get(j.id) || []) {
+      res.write(`data: ${JSON.stringify(store.public(j))}\n\n`);
+      if (TERMINAL.includes(j.state) || j.state === 'expired') res.end();
+    }
+  }
+  function finish(j, state, code) {
+    store.finish(j, state, code); notify(j); return j;
+  }
+  function sweep() {
+    if (closed) return;
+    for (const j of store.all()) {
+      if (j.state === 'queued' && j.expiresAt <= now()) finish(j, 'failed', 'queue_expired');
+      else if (ACTIVE.includes(j.state)) {
+        if (now() - j.startedAt >= 600000) finish(j, 'failed', 'timeout');
+        else if (!workers.has(j.workerId) || now() - workers.get(j.workerId).seen >= 35000) finish(j, 'failed', 'worker_lost');
+      }
+    }
+    store.prune();
+  }
+  function owner(req, res, next) {
+    const j = store.get(req.params.id);
+    const bearer = req.headers.authorization?.match(/^Bearer (\S+)$/)?.[1];
+    const token = bearer || ((req.path.endsWith('/events') || req.path.endsWith('/file')) && req.query.token);
+    if (!j || j.state === 'expired' || typeof token !== 'string' || token.length > 256 || hash(token) !== j.tokenHash) return res.status(404).json({ error: 'Conversion not found or expired.' });
+    req.job = j; res.set('Cache-Control', 'no-store'); next();
+  }
+  publicApp.get(`${base}/health`, (req, res) => res.json({ status: 'ok' }));
+  publicApp.get(`${base}/api/platforms`, (req, res) => {
+    sweep(); res.set('Cache-Control', 'no-store').json({ platforms: Object.fromEntries(PLATFORMS.map(p => [p, status(p)])), limits: { durationSeconds: 900 } });
+  });
+  publicApp.post(`${base}/api/jobs`, (req, res) => {
+    sweep(); let source;
+    try { source = canonicalize(req.body?.url); } catch { return res.status(400).json({ code: 'unsupported_url', error: 'Use an individual HTTPS YouTube, SoundCloud or Bandcamp link.' }); }
+    if (!status(source.platform).available) return res.status(503).json({ code: 'platform_unavailable', error: 'This platform is temporarily unavailable.' });
+    const result = store.admit(req.ip, source.platform, source.url);
+    if (result.error) return res.status(result.error).json({ code: result.code, error: result.message });
+    res.status(202).json(result);
+  });
+  publicApp.get(`${base}/api/jobs/:id`, owner, (req, res) => { sweep(); res.json(store.public(store.get(req.job.id) || req.job)); });
+  publicApp.post(`${base}/api/jobs/:id/cancel`, owner, (req, res) => {
+    if (!TERMINAL.includes(req.job.state)) finish(req.job, 'cancelled');
+    res.json(store.public(store.get(req.job.id)));
+  });
+  publicApp.get(`${base}/api/jobs/:id/events`, owner, (req, res) => {
+    const clients = streams.get(req.job.id) || new Set();
+    if (clients.size >= 2) return res.status(429).json({ error: 'Too many progress connections.' });
+    res.set({ 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no' });
+    res.flushHeaders();
+    res.write(`data: ${JSON.stringify(store.public(req.job))}\n\n`);
+    if (TERMINAL.includes(req.job.state)) return res.end();
+    clients.add(res); streams.set(req.job.id, clients);
+    const ping = setInterval(() => res.write(': heartbeat\n\n'), 15000); ping.unref();
+    res.on('close', () => { clearInterval(ping); clients.delete(res); if (!clients.size) streams.delete(req.job.id); });
+  });
+  publicApp.get(`${base}/api/jobs/:id/file`, owner, (req, res) => {
+    if (req.job.state !== 'ready') return res.status(409).json({ error: 'MP3 is not ready.' });
+    const file = path.join(store.files, `${req.job.id}.mp3`);
+    if (!fs.existsSync(file)) return res.status(404).json({ error: 'MP3 expired.' });
+    res.download(file, (safeTitle(req.job.title).replace(/[<>:"/\\|?*]/g, '').slice(0, 120) || 'audio') + '.mp3');
+  });
+  publicApp.use(base || '/', express.static(path.join(__dirname, 'public')));
 
-  // Broadcast to all log viewers
-  const data = JSON.stringify({ timestamp, level, message, full: logLine });
-  logClients.forEach(client => {
+  // These routes are served ONLY by the internal listener, never by publicApp.
+  internalApp.use(express.json({ limit: '8kb', type: 'application/json' }));
+  internalApp.use((req, res, next) => {
+    const id = req.body?.workerId || req.headers['x-worker-id'];
+    const supplied = req.headers.authorization?.match(/^Bearer (\S+)$/)?.[1];
+    if (typeof id !== 'string' || !Object.hasOwn(tokens, id) || typeof supplied !== 'string' || hash(supplied) !== hash(tokens[id])) return res.status(403).json({ error: 'Worker authentication required.' });
+    req.workerId = id; next();
+  });
+  internalApp.post('/internal/heartbeat', (req, res) => {
+    const permitted = assignments[req.workerId] || [];
+    const advertised = Array.isArray(req.body.platforms) ? req.body.platforms : [];
+    workers.set(req.workerId, { seen: now(), platforms: advertised.filter(p => PLATFORMS.includes(p) && permitted.includes(p)), versions: req.body.versions || {} });
+    res.json({ ok: true });
+  });
+  internalApp.post('/internal/claim', (req, res) => {
+    sweep(); const w = workers.get(req.workerId), active = store.all().filter(j => ACTIVE.includes(j.state));
+    if (!w || now() - w.seen >= 35000 || active.length >= 2 || active.some(j => j.workerId === req.workerId)) return res.json({ job: null });
+    const job = store.all().find(j => j.state === 'queued' && w.platforms.includes(j.platform) && status(j.platform).available);
+    if (!job) return res.json({ job: null });
+    const leaseToken = random();
+    Object.assign(job, { state: 'fetching', message: MESSAGES.fetching, startedAt: now(), expiresAt: now() + 600000, workerId: req.workerId, leaseHash: hash(leaseToken) });
+    store.save(job); notify(job); res.json({ job: { id: job.id, url: job.url, platform: job.platform, leaseToken } });
+  });
+  function lease(req, res, next) {
+    sweep(); const job = store.get(req.params.id), token = req.body?.leaseToken || req.headers['x-lease-token'];
+    if (!job || job.workerId !== req.workerId || typeof token !== 'string' || hash(token) !== job.leaseHash || !ACTIVE.includes(job.state)) return res.status(409).json({ cancelled: true });
+    req.job = job; next();
+  }
+  internalApp.post('/internal/jobs/:id/progress', lease, (req, res) => {
+    const { state, percent, title } = req.body;
+    if (state && !ACTIVE.includes(state)) return res.status(400).json({ error: 'Invalid progress state.' });
+    const j = req.job;
+    if (state && ACTIVE.indexOf(state) >= ACTIVE.indexOf(j.state)) j.state = state;
+    if (Number.isFinite(percent)) j.percent = Math.max(j.percent, Math.min(99, Math.max(0, percent)));
+    if (title) j.title = safeTitle(title);
+    j.message = MESSAGES[j.state]; store.save(j); notify(j); res.json({ cancelled: false });
+  });
+  internalApp.post('/internal/jobs/:id/fail', lease, (req, res) => {
+    const code = String(req.body.code || 'worker_error').slice(0, 64);
+    if (code === 'platform_blocked') store.block(req.job.platform);
+    finish(req.job, code === 'cancelled' ? 'cancelled' : 'failed', code); res.json({ ok: true });
+  });
+  internalApp.post('/internal/jobs/:id/result', lease, async (req, res) => {
+    if (uploads.has(req.job.id)) return res.status(409).json({ error: 'Upload already in progress.' });
+    if (!req.is('audio/mpeg') || Number(req.headers['content-length']) > MAX_BYTES) return res.status(413).json({ error: 'Invalid result.' });
+    const id = req.job.id, temporary = path.join(store.files, `${id}.upload`), result = path.join(store.files, `${id}.mp3`);
+    uploads.set(id, true); let bytes = 0, prefix = Buffer.alloc(0);
+    const limiter = new Transform({ transform(chunk, encoding, done) {
+      bytes += chunk.length; if (prefix.length < 3) prefix = Buffer.concat([prefix, chunk]).subarray(0, 3);
+      const current = store.get(id);
+      if (!current || current.leaseHash !== req.job.leaseHash || !ACTIVE.includes(current.state) || bytes > MAX_BYTES || now() - current.startedAt >= 600000) return done(new Error('Upload rejected'));
+      done(null, chunk);
+    } });
+    const abort = new AbortController(); const timeout = setTimeout(() => abort.abort(), Math.max(1, 600000 - (now() - req.job.startedAt))); timeout.unref();
     try {
-      client.write(`data: ${data}\n\n`);
-    } catch (err) {
-      logClients.delete(client);
-    }
+      await pipeline(req, limiter, fs.createWriteStream(temporary, { flags: 'wx' }), { signal: abort.signal });
+      const valid = bytes >= 128 && (prefix.toString() === 'ID3' || (prefix[0] === 255 && (prefix[1] & 224) === 224));
+      const j = store.get(id);
+      if (!valid || !j || j.leaseHash !== req.job.leaseHash || !ACTIVE.includes(j.state)) throw new Error('Invalid audio');
+      if (req.headers['x-track-title']) j.title = safeTitle(decodeURIComponent(req.headers['x-track-title']));
+      fs.renameSync(temporary, result); finish(j, 'ready'); res.json({ ok: true });
+    } catch {
+      fs.rmSync(temporary, { force: true });
+      const j = store.get(id); if (j && ACTIVE.includes(j.state)) finish(j, 'failed', bytes > MAX_BYTES ? 'size_limit' : 'invalid_audio');
+      if (!res.destroyed) res.status(409).json({ error: 'Result rejected.' });
+    } finally { clearTimeout(timeout); uploads.delete(id); }
   });
+  internalApp.post('/internal/health', (req, res) => res.json({ worker: workers.get(req.workerId) || null, activeJobs: store.all().filter(j => ACTIVE.includes(j.state)).length }));
+  for (const app of [publicApp, internalApp]) {
+    app.use((req, res) => res.status(404).json({ error: 'Not found.' }));
+    app.use((err, req, res, next) => { if (!res.headersSent) res.status(err.type === 'entity.too.large' ? 413 : 400).json({ error: 'Request could not be processed.' }); });
+  }
+  const timer = setInterval(sweep, 5000); timer.unref();
+  return { publicApp, internalApp, store, sweep, close() {
+    if (closed) return; closed = true; clearInterval(timer);
+    for (const clients of streams.values()) for (const res of clients) res.end();
+    store.close();
+  } };
 }
 
-// Detect platform from URL using regex
-function detectPlatform(url) {
-  if (SOUNDCLOUD_URL_PATTERN.test(url)) return 'soundcloud';
-  if (BANDCAMP_URL_PATTERN.test(url)) return 'bandcamp';
-  return 'unknown';
-}
-
-function isYouTubeUrl(url) {
-  return YOUTUBE_URL_PATTERN.test(url);
-}
-
-function getPlatformLabel(platform) {
-  return PLATFORM_LABELS[platform] || 'audio source';
-}
-
-function getYtDlpStrategy(platform) {
-  return YTDLP_STRATEGIES[platform] || YTDLP_STRATEGIES.unknown;
-}
-
-function resolveCommandPath(command) {
-  if (!command) return 'unknown';
-  if (path.isAbsolute(command) || /[\\/]/.test(command)) {
-    return command;
-  }
-
-  const locator = process.platform === 'win32' ? 'where.exe' : 'which';
-  const result = spawnSync(locator, [command], { encoding: 'utf8' });
-
-  if (result.status === 0) {
-    const firstMatch = result.stdout
-      .split(/\r?\n/)
-      .map(line => line.trim())
-      .find(Boolean);
-
-    if (firstMatch) {
-      return firstMatch;
-    }
-  }
-
-  return command;
-}
-
-function getYtDlpRuntimeInfo() {
-  let version = 'unknown';
-
-  try {
-    version = execFileSync(YTDLP_COMMAND, ['--version'], { encoding: 'utf8' }).trim();
-  } catch (err) {
-    // The health endpoint returns "unknown" if the binary is missing.
-  }
-
-  return {
-    command: YTDLP_COMMAND,
-    resolvedPath: resolveCommandPath(YTDLP_COMMAND),
-    version
-  };
-}
-
-function buildYtDlpOptions({ metadataOnly = false, tempFileBase = null } = {}) {
-  const options = {
-    noWarnings: true,
-    noCheckCertificate: true,
-    noPlaylist: true
-  };
-
-  if (metadataOnly) {
-    return {
-      ...options,
-      dumpSingleJson: true
-    };
-  }
-
-  return {
-    ...options,
-    extractAudio: true,
-    audioFormat: 'mp3',
-    audioQuality: '320k',
-    format: 'bestaudio/best',
-    addMetadata: true,
-    embedThumbnail: true,
-    output: tempFileBase,
-    ...(process.env.FFMPEG_PATH && { ffmpegLocation: process.env.FFMPEG_PATH })
-  };
-}
-
-// Normalize common yt-dlp failures into source-agnostic user messages.
-function getErrorMessage(error, exitCode = null) {
-  const errorMsg = [
-    typeof error === 'string' ? error : null,
-    error?.message,
-    error?.stderr,
-    error?.stdout
-  ]
-    .filter(Boolean)
-    .join(' ')
-    .toLowerCase();
-
-  if (errorMsg.includes('requested format is not available') ||
-      errorMsg.includes('only images are available')) {
-    return 'No downloadable audio stream was available for this source.';
-  }
-  if (errorMsg.includes('geo') || errorMsg.includes('not available in your')) {
-    return 'This source is not available in your region.';
-  }
-  if (errorMsg.includes('copyright')) {
-    return 'This source is unavailable due to copyright restrictions.';
-  }
-  if (errorMsg.includes('members-only') || errorMsg.includes('members only')) {
-    return 'This source requires an account or membership and cannot be downloaded.';
-  }
-  if (errorMsg.includes('private') || errorMsg.includes('unavailable')) {
-    return 'This source is private or unavailable.';
-  }
-  if (errorMsg.includes('timeout') || errorMsg.includes('timed out')) {
-    return 'Download timed out. The source may be too large or slow to respond.';
-  }
-  if (errorMsg.includes('network') || errorMsg.includes('enotfound') || errorMsg.includes('eai_again')) {
-    return 'Network error. Please check your internet connection.';
-  }
-  if (exitCode === 1) {
-    return 'Download failed. The source may be unavailable or temporarily blocked.';
-  }
-
-  return error?.message || 'An unknown download error occurred.';
-}
-
-// Sanitize filename to remove invalid characters
-function sanitizeFilename(filename) {
-  return filename.replace(/[^\w\s-]/gi, '').trim().substring(0, 100);
-}
-
-// Send SSE progress update
-function sendProgress(sessionId, data) {
-  const session = activeSessions.get(sessionId);
-  if (session && session.res) {
-    session.res.write(`data: ${JSON.stringify(data)}\n\n`);
-  }
-}
-
-// Wait for SSE connection to be established
-function waitForSSEConnection(sessionId, maxWaitMs = 5000) {
-  return new Promise((resolve) => {
-    const startTime = Date.now();
-    const checkInterval = setInterval(() => {
-      const session = activeSessions.get(sessionId);
-      if (session && session.res) {
-        clearInterval(checkInterval);
-        resolve(true);
-      } else if (Date.now() - startTime > maxWaitMs) {
-        clearInterval(checkInterval);
-        log(`SSE connection timeout for session: ${sessionId}`, 'WARN');
-        resolve(false);
-      }
-    }, 50);
+if (require.main === module) {
+  const service = createApps();
+  const pub = service.publicApp.listen(Number(process.env.PORT || 3003), process.env.HOST || '0.0.0.0');
+  const internal = service.internalApp.listen(Number(process.env.INTERNAL_PORT || 3004), process.env.INTERNAL_HOST || '127.0.0.1');
+  for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, () => {
+    pub.close(); internal.close(); service.close(); setTimeout(() => process.exit(0), 1000).unref();
   });
+  console.log('MP3 Maker started; platform availability requires a verified, online worker.');
 }
-
-// Unified download function using yt-dlp for supported audio sources.
-async function downloadAudio(url, sessionId, platform) {
-  const tempFileBase = path.join(__dirname, 'public', 'temp', `temp-${sessionId}`);
-  const tempFile = `${tempFileBase}.mp3`;
-  let trackTitle = 'audio';
-  let thumbnailUrl = null;
-  const platformLabel = getPlatformLabel(platform);
-  const strategy = getYtDlpStrategy(platform);
-
-  sendProgress(sessionId, {
-    status: 'fetching',
-    percent: 0,
-    message: `🔍 Connecting to ${platformLabel}...`
-  });
-
-  return new Promise(async (resolve, reject) => {
-    let countdownInterval;
-
-    try {
-      log(`Using yt-dlp strategy for ${platform}: ${strategy}`, 'INFO');
-      log(`Starting info fetch for [${platform}]: ${url}`, 'INFO');
-      sendProgress(sessionId, {
-        status: 'fetching',
-        percent: 2,
-        message: `📡 Fetching ${platformLabel} info...`
-      });
-
-      let countdown = 30;
-      countdownInterval = setInterval(() => {
-        countdown--;
-        if (countdown > 0) {
-          sendProgress(sessionId, {
-            status: 'fetching',
-            percent: 2 + ((30 - countdown) / 30 * 3),
-            message: `📡 Fetching ${platformLabel} info... (${countdown}s)`
-          });
-        }
-      }, 1000);
-
-      const titleOutput = await Promise.race([
-        ytDlp(url, buildYtDlpOptions({ metadataOnly: true })),
-        new Promise((_, timeoutReject) =>
-          setTimeout(() => timeoutReject(new Error('Info fetch timeout after 30s')), 30000)
-        )
-      ]);
-
-      if (countdownInterval) clearInterval(countdownInterval);
-
-      if (titleOutput && titleOutput.title) {
-        trackTitle = sanitizeFilename(titleOutput.title);
-        log(`Track title: ${trackTitle}`);
-
-        if (titleOutput.thumbnail) {
-          thumbnailUrl = titleOutput.thumbnail;
-          log(`Thumbnail URL: ${thumbnailUrl}`);
-        } else if (titleOutput.thumbnails && titleOutput.thumbnails.length > 0) {
-          const bestThumbnail = titleOutput.thumbnails[titleOutput.thumbnails.length - 1];
-          thumbnailUrl = bestThumbnail.url;
-          log(`Thumbnail URL: ${thumbnailUrl}`);
-        }
-
-        sendProgress(sessionId, {
-          status: 'fetching',
-          percent: 5,
-          message: `✨ Found: ${trackTitle.substring(0, 40)}${trackTitle.length > 40 ? '...' : ''}`
-        });
-      }
-      log('Info fetch completed successfully', 'INFO');
-    } catch (err) {
-      if (countdownInterval) clearInterval(countdownInterval);
-      log(`Could not fetch title via ${strategy}: ${err.message}`, 'WARN');
-    }
-
-    sendProgress(sessionId, {
-      status: 'fetching',
-      percent: 8,
-      message: '🎵 Preparing download...'
-    });
-
-    const ytDlpProcess = ytDlp.exec(url, buildYtDlpOptions({ tempFileBase }));
-    let stdoutOutput = '';
-    let stderrOutput = '';
-
-    const session = activeSessions.get(sessionId);
-    if (session) {
-      session.ytDlpProcess = ytDlpProcess;
-      session.tempFileBase = tempFileBase;
-    }
-
-    if (ytDlpProcess.stdout) {
-      ytDlpProcess.stdout.on('data', (data) => {
-        const output = data.toString();
-        stdoutOutput += output;
-        log(`yt-dlp: ${output.trim()}`);
-
-        if (output.includes('Extracting URL')) {
-          sendProgress(sessionId, {
-            status: 'fetching',
-            percent: 10,
-            message: '🔗 Extracting URL...'
-          });
-        } else if (output.includes('Downloading webpage')) {
-          sendProgress(sessionId, {
-            status: 'fetching',
-            percent: 15,
-            message: '📄 Loading webpage...'
-          });
-        } else if (output.includes('Downloading tv client config') || output.includes('Downloading player config')) {
-          sendProgress(sessionId, {
-            status: 'fetching',
-            percent: 20,
-            message: '⚙️ Loading config...'
-          });
-        } else if (output.includes('player API JSON')) {
-          sendProgress(sessionId, {
-            status: 'fetching',
-            percent: 25,
-            message: '🎬 Loading player API...'
-          });
-        } else if (output.includes('Downloading m3u8 information')) {
-          sendProgress(sessionId, {
-            status: 'fetching',
-            percent: 30,
-            message: '📊 Analyzing streams...'
-          });
-        } else if (output.includes('Downloading 1 format')) {
-          sendProgress(sessionId, {
-            status: 'fetching',
-            percent: 35,
-            message: '✅ Format selected!'
-          });
-        }
-
-        const sleepMatch = output.match(/Sleeping\s+(\d+\.?\d*)\s+seconds/);
-        if (sleepMatch) {
-          const sleepSeconds = parseFloat(sleepMatch[1]);
-          let countdown = Math.ceil(sleepSeconds);
-
-          sendProgress(sessionId, {
-            status: 'fetching',
-            percent: 10,
-            message: `⏳ Rate limit: ${countdown}s...`
-          });
-
-          const sleepCountdownInterval = setInterval(() => {
-            countdown--;
-            if (countdown > 0) {
-              sendProgress(sessionId, {
-                status: 'fetching',
-                percent: 10 + ((sleepSeconds - countdown) / sleepSeconds) * 5,
-                message: `⏳ Rate limit: ${countdown}s...`
-              });
-            } else {
-              clearInterval(sleepCountdownInterval);
-            }
-          }, 1000);
-        }
-
-        const progressMatch = output.match(/(\d+\.?\d*)%/);
-        const speedMatch = output.match(/(\d+\.?\d*[KMG]iB\/s)/);
-        const etaMatch = output.match(/ETA\s+(\d+:\d+)/);
-
-        if (progressMatch) {
-          const percent = parseFloat(progressMatch[1]);
-
-          let status = 'downloading';
-          let message = 'Downloading...';
-
-          if (output.includes('[download]')) {
-            status = 'downloading';
-            message = 'Downloading...';
-          } else if (output.includes('Extracting audio')) {
-            status = 'converting';
-            message = 'Converting to MP3...';
-          } else if (output.includes('Deleting') || output.includes('has already been downloaded')) {
-            status = 'converting';
-            message = 'Converting to MP3...';
-          }
-
-          sendProgress(sessionId, {
-            status,
-            percent: Math.min(percent, 99),
-            message,
-            speed: speedMatch ? speedMatch[1] : null,
-            eta: etaMatch ? etaMatch[1] : null
-          });
-        } else if (output.includes('Extracting audio') || output.includes('[ExtractAudio]')) {
-          sendProgress(sessionId, {
-            status: 'converting',
-            percent: 95,
-            message: 'Converting to MP3...'
-          });
-        }
-      });
-    }
-
-    if (ytDlpProcess.stderr) {
-      ytDlpProcess.stderr.on('data', (data) => {
-        const output = data.toString();
-        stderrOutput += output;
-        log(`yt-dlp stderr: ${output.trim()}`, 'WARN');
-      });
-    }
-
-    ytDlpProcess.on('close', (code) => {
-      if (code === 0) {
-        sendProgress(sessionId, {
-          status: 'complete',
-          percent: 100,
-          message: 'Complete!'
-        });
-
-        const activeSession = activeSessions.get(sessionId);
-        if (activeSession) {
-          activeSession.trackTitle = trackTitle;
-          activeSession.thumbnailUrl = thumbnailUrl;
-        }
-        resolve(tempFile);
-      } else {
-        const details = stderrOutput.trim() || stdoutOutput.trim();
-        reject(new Error(`yt-dlp process failed with exit code ${code}${details ? `: ${details}` : ''}`));
-      }
-    });
-
-    ytDlpProcess.on('error', (err) => {
-      reject(err);
-    });
-  });
-}
-
-// SSE endpoint for progress updates
-app.get(`${BASE_PATH}/progress/:sessionId`, (req, res) => {
-  const { sessionId } = req.params;
-
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
-
-  if (!activeSessions.has(sessionId)) {
-    activeSessions.set(sessionId, {});
-  }
-  activeSessions.get(sessionId).res = res;
-
-  res.write(`data: ${JSON.stringify({ status: 'fetching', percent: 0, message: 'Preparing...' })}\n\n`);
-
-  req.on('close', () => {
-    const session = activeSessions.get(sessionId);
-    if (session) {
-      if (session.ytDlpProcess) {
-        try {
-          session.ytDlpProcess.kill('SIGTERM');
-          log(`Killed yt-dlp process for disconnected session: ${sessionId}`, 'WARN');
-        } catch (err) {
-          log(`Error killing process: ${err.message}`, 'ERROR');
-        }
-      }
-
-      if (session.tempFileBase && !session.tempFile) {
-        const possibleFiles = [
-          session.tempFileBase,
-          `${session.tempFileBase}.mp3`,
-          `${session.tempFileBase}.jpg`,
-          `${session.tempFileBase}.webp`,
-          `${session.tempFileBase}.png`
-        ];
-
-        possibleFiles.forEach(file => {
-          if (fs.existsSync(file)) {
-            try {
-              fs.unlinkSync(file);
-              log(`Cleaned up orphaned file: ${path.basename(file)}`, 'INFO');
-            } catch (err) {
-              log(`Error cleaning file: ${err.message}`, 'ERROR');
-            }
-          }
-        });
-      }
-
-      delete session.res;
-      delete session.ytDlpProcess;
-    }
-    log(`SSE connection closed for session: ${sessionId}`);
-  });
-});
-
-// Download endpoint
-app.post(`${BASE_PATH}/download`, async (req, res) => {
-  const startTime = Date.now();
-  const sessionId = Date.now().toString();
-  let tempFile = null;
-  let exitCode = null;
-
-  try {
-    const { url } = req.body;
-    const normalizedUrl = typeof url === 'string' ? url.trim() : '';
-
-    if (!normalizedUrl) {
-      log(`Invalid URL attempted: ${url}`, 'WARN');
-      return res.status(400).json({ error: 'Please provide a valid URL' });
-    }
-
-    if (isYouTubeUrl(normalizedUrl)) {
-      return res.status(400).json({
-        error: 'YouTube links are temporarily unsupported. Please use SoundCloud or Bandcamp.'
-      });
-    }
-
-    const platform = detectPlatform(normalizedUrl);
-
-    if (platform === 'unknown') {
-      return res.status(400).json({ error: 'Unsupported URL. Please use SoundCloud or Bandcamp links.' });
-    }
-
-    log(`Download request [${platform}]: ${normalizedUrl}`);
-
-    res.json({ sessionId, platform });
-
-    if (!activeSessions.has(sessionId)) {
-      activeSessions.set(sessionId, {});
-    }
-    activeSessions.get(sessionId).url = normalizedUrl;
-    activeSessions.get(sessionId).platform = platform;
-
-    await waitForSSEConnection(sessionId);
-
-    tempFile = await downloadAudio(normalizedUrl, sessionId, platform);
-
-    const duration = ((Date.now() - startTime) / 1000).toFixed(2);
-    log(`Download completed in ${duration}s [${platform}]`, 'SUCCESS');
-
-    activeSessions.get(sessionId).tempFile = tempFile;
-  } catch (error) {
-    log(`Error: ${error.message}`, 'ERROR');
-
-    const exitCodeMatch = error.message.match(/exit code (\d+)/);
-    if (exitCodeMatch) {
-      exitCode = parseInt(exitCodeMatch[1], 10);
-    }
-
-    if (tempFile && fs.existsSync(tempFile)) {
-      fs.unlinkSync(tempFile);
-    }
-
-    sendProgress(sessionId, {
-      status: 'error',
-      percent: 0,
-      message: getErrorMessage(error, exitCode),
-      error: getErrorMessage(error, exitCode)
-    });
-  }
-});
-
-// File retrieval endpoint
-app.get(`${BASE_PATH}/file/:sessionId`, (req, res) => {
-  const { sessionId } = req.params;
-  const session = activeSessions.get(sessionId);
-
-  if (!session || !session.tempFile) {
-    return res.status(404).json({ error: 'File not found or expired' });
-  }
-
-  const tempFile = session.tempFile;
-
-  if (!fs.existsSync(tempFile)) {
-    return res.status(404).json({ error: 'File not found' });
-  }
-
-  const trackTitle = session.trackTitle || 'audio';
-  const filename = `${trackTitle}.mp3`;
-
-  res.download(tempFile, filename, (err) => {
-    if (fs.existsSync(tempFile)) {
-      fs.unlinkSync(tempFile);
-      log('Temp file deleted');
-    }
-
-    activeSessions.delete(sessionId);
-
-    if (err) {
-      log(`Download error: ${err.message}`, 'ERROR');
-    }
-  });
-});
-
-// Thumbnail endpoint
-app.get(`${BASE_PATH}/thumbnail/:sessionId`, (req, res) => {
-  const { sessionId } = req.params;
-  const session = activeSessions.get(sessionId);
-
-  if (!session) {
-    return res.status(404).json({ error: 'Session not found' });
-  }
-
-  const thumbnailUrl = session.thumbnailUrl || `${BASE_PATH}/oops.jpg`;
-  res.json({ thumbnailUrl });
-});
-
-// Health check endpoint
-app.get(`${BASE_PATH}/health`, (req, res) => {
-  res.json({ status: 'ok', uptime: process.uptime() });
-});
-
-// Admin: Health check endpoint
-// TODO: Add authentication in production
-app.get(`${BASE_PATH}/admin/health`, async (req, res) => {
-  try {
-    const ytdlp = getYtDlpRuntimeInfo();
-
-    res.json({
-      supportedPlatforms: SUPPORTED_PLATFORMS,
-      ytdlp: {
-        command: ytdlp.command,
-        resolvedPath: ytdlp.resolvedPath,
-        version: ytdlp.version
-      },
-      server: {
-        uptimeSeconds: Math.round(process.uptime())
-      }
-    });
-  } catch (error) {
-    log(`Admin health check error: ${error.message}`, 'ERROR');
-    res.status(500).json({ error: 'Failed to get health status' });
-  }
-});
-
-// Admin: Real-time logs endpoint (SSE)
-// TODO: Add authentication in production
-app.get(`${BASE_PATH}/admin/logs`, (req, res) => {
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
-
-  logHistory.forEach(entry => {
-    const data = JSON.stringify(entry);
-    res.write(`data: ${data}\n\n`);
-  });
-
-  logClients.add(res);
-  log(`Admin log viewer connected (${logClients.size} active)`, 'INFO');
-
-  req.on('close', () => {
-    logClients.delete(res);
-    log(`Admin log viewer disconnected (${logClients.size} active)`, 'INFO');
-  });
-});
-
-// Clean up orphaned temp files on startup
-function cleanupTempFiles() {
-  const tempDir = path.join(__dirname, 'public', 'temp');
-  if (!fs.existsSync(tempDir)) {
-    fs.mkdirSync(tempDir, { recursive: true });
-    return;
-  }
-  const files = fs.readdirSync(tempDir);
-  let cleaned = 0;
-  files.forEach(file => {
-    if (file.startsWith('temp-') && (
-      file.endsWith('.mp3') ||
-      file.endsWith('.jpg') ||
-      file.endsWith('.webp') ||
-      file.endsWith('.png') ||
-      file.match(/^temp-\d+$/)
-    )) {
-      try {
-        fs.unlinkSync(path.join(tempDir, file));
-        cleaned++;
-      } catch (err) {
-        // Ignore cleanup errors on startup
-      }
-    }
-  });
-  if (cleaned > 0) {
-    log(`Cleaned up ${cleaned} orphaned temp file(s)`, 'INFO');
-  }
-}
-
-// Start server
-cleanupTempFiles();
-app.listen(PORT, () => {
-  const ytdlp = getYtDlpRuntimeInfo();
-  log(`Server running on http://localhost:${PORT}`, 'SUCCESS');
-  log(`Supports: ${SUPPORTED_PLATFORMS.map(getPlatformLabel).join(' & ')}`, 'INFO');
-  log('Output: CBR 320kbps MP3', 'INFO');
-  log(`yt-dlp command: ${ytdlp.command}`, 'INFO');
-  log(`yt-dlp resolved path: ${ytdlp.resolvedPath}`, 'INFO');
-  if (ytdlp.version === 'unknown') {
-    log('Could not determine yt-dlp version at startup', 'WARN');
-  } else {
-    log(`yt-dlp version: ${ytdlp.version}`, 'INFO');
-  }
-  log('Press Ctrl+C to stop the server');
-});
+module.exports = { createApps };

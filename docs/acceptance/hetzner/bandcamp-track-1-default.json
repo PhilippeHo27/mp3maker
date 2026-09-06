@@ -1,0 +1,19 @@
+{
+  "platform": "bandcamp",
+  "ok": true,
+  "versions": {
+    "python": "3.13.7",
+    "yt-dlp": "2026.8.19",
+    "potProvider": "1.3.2",
+    "ffmpeg": "ffmpeg version 5.1.9-0+deb12u1 Copyright (c) 2000-2026 the FFmpeg developers",
+    "ffprobe": "ffprobe version 5.1.9-0+deb12u1 Copyright (c) 2007-2026 the FFmpeg developers",
+    "deno": "deno 2.9.6 (stable, release, x86_64-unknown-linux-gnu)"
+  },
+  "title": "Ben Prunty - Lanius (Battle)",
+  "durationSeconds": 260.91102,
+  "bytes": 6331541,
+  "elapsedSeconds": 29.65,
+  "sample": "bandcamp-track",
+  "attempt": 1,
+  "pot": false
+}

@@ -1,0 +1,23 @@
+{
+  "ok": true,
+  "checks": [
+    "private_worker_registration",
+    "direct_egress_blocked",
+    "metadata_proxy_blocked",
+    "internal_authentication",
+    "job_creation",
+    "worker_claim",
+    "real_bandcamp_conversion",
+    "result_upload",
+    "authenticated_download",
+    "production_base_path"
+  ],
+  "states": [
+    "queued",
+    "fetching",
+    "downloading",
+    "converting",
+    "ready"
+  ],
+  "bytes": 258254
+}

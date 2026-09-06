@@ -1,87 +1,51 @@
 # MP3 Maker
 
-MP3 Maker converts public SoundCloud and Bandcamp tracks to high-bitrate MP3 with live progress updates and a simple admin log view.
+A small public-link MP3 converter with an Express API, SQLite job queue, and an isolated Python/yt-dlp/FFmpeg worker. Tracks must be public, single-item, and at most 15 minutes. Output is 192 kbps MP3; transcoding does not improve the original audio quality.
 
-## Supported Sources
-- SoundCloud tracks
-- Bandcamp tracks
-- MP3 output with metadata and embedded thumbnails when available
-- Real-time progress updates over Server-Sent Events
+## Current release status
 
-## Requirements
-- Node.js `>= 18`
-- `yt-dlp` available in `PATH`
-- `ffmpeg` available in `PATH`
+Implementation is in progress, **not released**. Platforms default to unavailable until explicitly enabled and an assigned worker is online.
 
-## Install
-1. Install dependencies:
-   ```bash
-   npm install
-   ```
-2. Install system tools:
-   ```bash
-   yt-dlp --version
-   ffmpeg -version
-   ```
-3. Start the app:
-   ```bash
-   npm start
-   ```
-4. Open `http://localhost:3003`
+Hetzner acceptance: Bandcamp passed four conversions. YouTube passed only two of ten both with and without the automatic token provider. SoundCloud returned HTTP 403 for all four attempts. Desktop comparison is blocked by disabled firmware virtualization. See [acceptance evidence](docs/acceptance/README.md) and [execution ledger](docs/implementation/progress.md).
 
-## Runtime Configuration
-- `PORT`: server port, defaults to `3003`
-- `BASE_PATH`: empty locally, `/mp3maker` in production
-- `YTDLP_BIN`: optional explicit path or command for the `yt-dlp` binary
+## Development
 
-Example:
-```bash
-YTDLP_BIN=/usr/bin/yt-dlp PORT=3003 npm start
+Use Node 24 or newer and Python 3.13. Docker packages the actual conversion dependencies.
+
+```sh
+npm ci --ignore-scripts
+python -m pip install -r requirements-worker.txt
+npm test
+npm run test:python
+npm start
 ```
 
-## Ubuntu / PM2
-Install runtime packages on the host:
-```bash
-sudo apt update
-sudo apt install -y python3 python-is-python3 yt-dlp ffmpeg
-```
+The UI runs at http://localhost:3003. Without a configured worker it correctly displays unavailable platforms. `runtime/` contains local SQLite and files; it must not be committed or served statically.
 
-Start the app with PM2:
-```bash
-pm2 start ecosystem.config.js --env production
-pm2 save
-```
+## Architecture
 
-## How It Works
-- Express serves the UI and download endpoints
-- `yt-dlp-exec` calls the system `yt-dlp` binary
-- The backend fetches metadata first, then downloads and converts to MP3
-- The frontend listens to progress over SSE and downloads the finished file from `/file/:sessionId`
+- Public listener: port 3003, optional `BASE_PATH` (production `/mp3maker`).
+- Internal listener: port 3004, worker credentials required. Never route this port publicly.
+- Jobs survive browser refresh/disconnection. Cancellation is explicit. Interrupted active jobs fail after API restart.
+- One running job per worker, two globally, ten queued. Each client gets one outstanding job and five submissions per hour.
+- Jobs time out after ten minutes; completed files expire after one hour. Worker temporary storage and result uploads are bounded.
+- Worker media traffic goes through the HTTPS proxy on an internal Docker network. It rejects private, loopback, metadata and reserved addresses after DNS resolution.
+- No cookies, Google credentials, generic extractors, public admin logs, or host pip updates during runtime.
 
-## API Endpoints
-- `POST /download`: starts a download and returns `{ sessionId, platform }`
-- `GET /progress/:sessionId`: SSE stream for progress events
-- `GET /file/:sessionId`: downloads the final MP3 file
-- `GET /thumbnail/:sessionId`: returns the session thumbnail URL
-- `GET /health`: basic health check
-- `GET /admin/health`: returns `supportedPlatforms`, `ytdlp`, and `server`
-- `GET /admin/logs`: SSE log stream for the admin modal
+## Public API
 
-## Troubleshooting
-### YouTube links
-YouTube links are intentionally unsupported for now. The app only accepts SoundCloud and Bandcamp URLs.
+All paths are relative to `BASE_PATH`.
 
-### `yt-dlp` not found
-Install `yt-dlp` on the host and make sure it is available in `PATH`, or set `YTDLP_BIN`.
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | `/api/platforms` | Current availability and duration limit |
+| POST | `/api/jobs` | Submit `{url}`; returns `{id, token}` |
+| GET | `/api/jobs/:id` | Retrieve status with bearer job token |
+| GET | `/api/jobs/:id/events` | Reconnectable SSE snapshot/progress |
+| POST | `/api/jobs/:id/cancel` | Explicit cancellation |
+| GET | `/api/jobs/:id/file` | Retrieve ready MP3 |
+| GET | `/health` | Basic liveness |
 
-### `ffmpeg` not found
-Install `ffmpeg` on the host so `yt-dlp` can extract audio and embed thumbnails.
+Events and file requests also accept the job token as a query parameter. Do not log query strings. The browser stores its current job credentials in session storage and polls for status, recovering after transient connection failures.
 
-## Project Files
-- `server.js`: Express backend and download pipeline
-- `public/`: frontend assets
-- `ecosystem.config.js`: PM2 runtime configuration
-- `.github/workflows/deploy.yml`: deployment workflow
-
-## License
-MIT
+See [SETUP.md](SETUP.md) for deployment configuration and remaining release checks.
