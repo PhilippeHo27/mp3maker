@@ -25,3 +25,12 @@ Security: worker job URLs canonicalized; extractor allowlist; actual egress rest
 - Replaced obsolete PM2/host-pip README and setup instructions with the actual worker architecture, configuration, and release gates.
 - Desktop blocker confirmed after normal Docker restart: firmware virtualization disabled, no hypervisor, WSL error HCS_E_HYPERV_NOT_INSTALLED. No BIOS changes, Windows feature changes, or reboot performed.
 - Production release remains pending. Continue with desktop virtualization prerequisite, identical-image comparison, private connectivity, browser acceptance, and Coolify release gates. Do not enable YouTube based on the two successful server samples.
+
+## Resumed 2026-09-06 (second agent; deployment unblock)
+- Previous session stopped mid-release at a provider usage limit, not a code fault. Coolify had built all three images and created `web` and `egress`, but never started them; `worker` was never created.
+- Root cause of the stalled worker: `compose.yaml` wrote the worker tmpfs as the YAML flow sequence `[/tmp:size=192m,mode=1777]`. A comma separates items in flow style, so this parsed as two mounts, `/tmp:size=192m` and `mode=1777`. Docker rejects the second: `invalid mount path: 'mode=1777' mount path must be absolute`. The worker container could not be created under any configuration.
+- Fix: quoted the entry as a single mount, `tmpfs: ["/tmp:size=192m,mode=1777"]`. Verified on the Hetzner daemon that it mounts rw at 196608k and stays writable by uid 10001 under `read_only: true`.
+- Verified unchanged: 17 JavaScript tests and 14 Python tests pass; yt-dlp 2026.08.19 matches the acceptance evidence.
+- Confirmed Coolify raw Compose mode preserved worker isolation. The generated compose keeps `worker` on the internal `media` network only and adds no Coolify network to it.
+- Release configuration confirmed Bandcamp-only: `ENABLED_PLATFORMS=bandcamp`, `HETZNER_PLATFORMS=bandcamp`, `WORKER_ASSIGNMENTS={"hetzner":["bandcamp"]}`, `TRUST_PROXY=10.0.1.20`.
+- Still outstanding and deliberately not attempted: desktop firmware virtualization prerequisite, identical-image desktop comparison, private connectivity, and full browser acceptance for real conversions and failure states. YouTube and SoundCloud remain unenabled and have not passed the Hetzner gate.
