@@ -42,3 +42,9 @@ Security: worker job URLs canonicalized; extractor allowlist; actual egress rest
 - Conclusion: the Hetzner failures are datacenter address reputation, not extraction logic or yt-dlp version. This matches the PO-token batch making no difference server-side. Reports saved in `docs/acceptance/desktop/`.
 - Ruling unchanged for the server: do not enable YouTube or SoundCloud on the Hetzner worker. The evidence supports relocating the worker to a residential address, not enabling those platforms where they still fail.
 - Next: worker startup on the desktop with the egress proxy retained, Tailscale private connectivity to the internal listener, and an access-control decision before any residential-address worker serves public traffic. The public site is currently unauthenticated, and sustained public volume is the most likely way to lose the address reputation the relocation depends on.
+
+## Live conversion confirmed 2026-09-06
+- A real YouTube conversion completed end to end through the public URL at `philippeho.dev/mp3maker`, served by the desktop worker over a temporary SSH tunnel to the internal listener. Confirmed by the user in the browser.
+- This exercises the previously untested part of the path: Cloudflare, Traefik path routing at `BASE_PATH=/mp3maker`, SSE progress streaming through the proxy, job claim over the tunnel, result upload, and authenticated file download.
+- Partially closes the browser acceptance gate. Real conversions are proven; failure states are still untested — cancellation, expiry, unsupported URL, and worker-offline behaviour have not been exercised in a browser.
+- The configuration used was temporary and is not the intended release shape: `ENABLED_PLATFORMS` was widened to `youtube,soundcloud,bandcamp` and a second worker credential `desktop` was added. Access control must be settled before this shape is left running, since the public site is unauthenticated and the worker runs on a residential address.
