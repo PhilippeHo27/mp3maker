@@ -5,11 +5,15 @@ const { pipeline } = require('node:stream/promises');
 const { Transform } = require('node:stream');
 const { Store, ACTIVE, TERMINAL, MESSAGES, hash, random } = require('./lib/store');
 const { canonicalize } = require('./lib/url');
+const { createAccess } = require('./lib/access');
 const PLATFORMS = ['youtube', 'soundcloud', 'bandcamp'];
 const MAX_BYTES = 150 * 1024 * 1024;
 const safeTitle = value => typeof value === 'string' ? value.replace(/[\u0000-\u001f\u007f]/g, '').slice(0, 200) : '';
 
 function createApps(options = {}) {
+  const access = createAccess(options.access ?? {
+    teamDomain: process.env.ACCESS_TEAM_DOMAIN, audience: process.env.ACCESS_AUD,
+  });
   const now = options.now || Date.now;
   const base = options.basePath ?? process.env.BASE_PATH ?? '';
   if (base && !/^\/[a-zA-Z0-9/_-]+$/.test(base)) throw new Error('Invalid BASE_PATH');
@@ -31,6 +35,15 @@ function createApps(options = {}) {
       'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'" });
     next();
   });
+  // Only the container-local health probe bypasses Access. Never trust forwarded IPs.
+  publicApp.use((req, res, next) => {
+    const local = ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress);
+    if (local && ['GET', 'HEAD'].includes(req.method) && req.path === `${base}/health`) {
+      return res.json({ status: 'ok' });
+    }
+    next();
+  });
+  if (access) publicApp.use(access);
   publicApp.use(express.json({ limit: '4kb' }));
   function status(platform) {
     const online = [...workers.values()].some(w => now() - w.seen < 35000 && w.platforms.includes(platform));

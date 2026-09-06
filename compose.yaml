@@ -13,6 +13,8 @@ services:
       WORKER_TOKENS: ${WORKER_TOKENS:?Set worker credentials}
       WORKER_ASSIGNMENTS: ${WORKER_ASSIGNMENTS:?Set worker assignments}
       TRUST_PROXY: ${TRUST_PROXY:-}
+      ACCESS_TEAM_DOMAIN: ${ACCESS_TEAM_DOMAIN:?Set Access team hostname}
+      ACCESS_AUD: ${ACCESS_AUD:?Set Access application audience}
     volumes:
       - /home/phil/app-data/mp3maker:/data
     networks: [media, edge, coolify]
