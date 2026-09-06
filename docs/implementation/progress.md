@@ -1,4 +1,10 @@
 # Reliable conversion execution ledger
+## Access work started 2026-09-06
+- User authorized keeping the temporary desktop worker, SSH tunnel and egress proxy running during Access work. No platform enablement changes authorized here.
+- Branch `codex/cloudflare-access`; clean baseline passes 17 JavaScript tests. PRs #3 and #4 already merged.
+- Cloudflare API access works through the installed plugin. Private Portal has one exact owner email and no account-level groups exist. Shared group starts with that member; friends' addresses have not been supplied.
+- Design and execution steps: `docs/implementation/access-control-plan.md`. Work is inline, no subagents.
+
 Approved spec: user plan in conversation, 2026-09-04.
 Tasks: (1) worker feasibility; (2) durable API; (3) public UI; (4) integration, security review, deployment.
 Ruling: work in E:/WebDev/mp3maker-reliable on codex/reliable-conversion; isolated sibling avoids changing original checkout.
