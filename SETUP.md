@@ -1,75 +1,39 @@
-# MP3 Maker Setup Guide
+# Deployment setup
 
-## Project Overview
-- Port: `3003`
-- Public path: local uses `/`, production uses `/mp3maker`
-- Supported sources: SoundCloud and Bandcamp
-- Runtime model: the app uses the system `yt-dlp` binary
-- No YouTube cookies or sidecar provider are required
+This branch is not yet approved by its acceptance checks for public release. Keep `ENABLED_PLATFORMS` empty until each platform passes real conversions on its assigned worker.
 
-## Requirements
-- Node.js `>= 18`
-- `yt-dlp` installed on the host and available in `PATH`
-- `ffmpeg` installed on the host and available in `PATH`
+## Coolify target
 
-## Local Development
-1. Install dependencies:
-   ```bash
-   npm install
-   ```
-2. Install `yt-dlp` and `ffmpeg` on your machine.
-3. Start the app:
-   ```bash
-   npm start
-   ```
-4. Open `http://localhost:3003`
+Use the Git-backed Compose application from `PhilHo-Projects/mp3maker`, manual releases, and a unique read-only deploy key if private. The workflow validates/tests/builds; pushes must not deploy automatically.
 
-Optional local override:
-```bash
-YTDLP_BIN=/absolute/path/to/yt-dlp npm start
-```
+Persist `/home/phil/app-data/mp3maker` at `/data` in the web container. Create it with owner UID/GID 1000 before startup; the web process runs as the unprivileged Node user. This holds both SQLite and finished MP3 files.
 
-## Ubuntu Server Setup
-1. Create the project directory:
-   ```bash
-   mkdir -p ~/projects/mp3maker
-   cd ~/projects/mp3maker
-   ```
-2. Clone the repository the first time:
-   ```bash
-   git clone git@github.com:PhilippeHo27/mp3maker.git .
-   ```
-3. Install runtime dependencies:
-   ```bash
-   sudo apt update
-   sudo apt install -y python3 python-is-python3 yt-dlp ffmpeg
-   npm install --production
-   ```
-4. Start with PM2:
-   ```bash
-   pm2 start ecosystem.config.js --env production
-   pm2 save
-   pm2 startup
-   ```
+Configure these environment values privately in Coolify:
 
-## Deployment
-- Pushes to `main` trigger `.github/workflows/deploy.yml`
-- The workflow:
-  - pulls the latest code
-  - installs `python3`, `yt-dlp`, and `ffmpeg`
-  - installs production dependencies
-  - restarts PM2 using `ecosystem.config.js`
+- `WORKER_TOKENS`: JSON object mapping worker IDs to independently generated random credentials, at least 32 characters each.
+- `WORKER_ASSIGNMENTS`: JSON object mapping worker IDs to permitted platform arrays.
+- `HETZNER_WORKER_TOKEN`: the credential corresponding to the `hetzner` worker ID.
+- `HETZNER_PLATFORMS`: platforms the Hetzner worker advertises.
+- `ENABLED_PLATFORMS`: comma-separated platforms that passed acceptance; empty by default.
+- `TRUST_PROXY`: explicit trusted proxy addresses/subnets. Do not use arbitrary forwarded headers or trust every hop.
 
-## Health & Debugging
-- `GET /health` returns a basic uptime check
-- `GET /admin/health` returns:
-  - supported platforms
-  - configured `yt-dlp` command
-  - resolved `yt-dlp` binary path
-  - active `yt-dlp` version
-  - server uptime
-- The admin modal in the UI also shows live logs and the same runtime status
+The public service is `web`, port 3003, with domain `https://philippeho.dev/mp3maker`. Disable Coolify Strip Prefix and verify generated Traefik routing preserves `/mp3maker`. Do not publish port 3004, the egress proxy, or a token-provider service. Keep the internal media network internal.
 
-## Notes
-- YouTube links are intentionally rejected for now
-- SoundCloud and Bandcamp continue to use the same shared `yt-dlp` download pipeline
+For Compose resources configure service domains using `docker_compose_domains`, not the application `domains` field.
+
+## Desktop prerequisite
+
+As checked on 2026-09-06, desktop firmware virtualization reports disabled and Docker cannot boot WSL2 (`HCS_E_HYPERV_NOT_INSTALLED`). Enable CPU virtualization in firmware and the Windows Virtual Machine Platform component as needed, then restart Windows and verify Docker Engine responds. This task has not changed firmware, Windows optional features, or sleep settings.
+
+After Docker works, run the exact same worker image and sample matrix locally. Only then select a desktop fallback. Hetzner also needs private Tailscale connectivity before a desktop worker can pull jobs. This connectivity and desktop startup configuration are not implemented yet.
+
+## Release checklist
+
+1. Complete the desktop/Hetzner acceptance matrix; retain JSON reports and image versions.
+2. Select only passing platform/worker assignments.
+3. Complete browser checks: real download, refresh, cancellation, expiry, queue saturation, and worker offline.
+4. Verify container network isolation, internal authentication, actual trusted proxy configuration, base-path routing, and SSE through Traefik.
+5. Create the Coolify resource and credentials, preserve the previous image for rollback, and release manually.
+6. Poll public routing after deployment; Traefik can take 30–60 seconds to recognize new containers.
+
+No public deployment has been performed by the resumed task.

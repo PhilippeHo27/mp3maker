@@ -1,0 +1,8 @@
+.git
+node_modules
+runtime
+.env
+*.mp3
+**/__pycache__
+.playwright*
+docs

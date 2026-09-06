@@ -1,0 +1,12 @@
+FROM denoland/deno:2.9.6@sha256:2014dc167ece617ef7e7ba40631ac2234c59e75ce693e7cc2dc2602b3c87859d AS deno
+FROM python:3.13.7-slim-bookworm@sha256:adafcc17694d715c905b4c7bebd96907a1fd5cf183395f0ebc4d3428bd22d92d
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg=7:5.1.9-0+deb12u1 ca-certificates && rm -rf /var/lib/apt/lists/*
+COPY --from=deno /usr/bin/deno /usr/local/bin/deno
+WORKDIR /app
+COPY requirements-worker.txt .
+RUN pip install --no-cache-dir -r requirements-worker.txt && useradd --uid 10001 --create-home worker
+COPY worker ./worker
+COPY tests/worker_test.py ./tests/worker_test.py
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 DENO_DIR=/tmp/deno HOME=/tmp
+USER 10001:10001
+ENTRYPOINT ["python", "-m", "worker"]

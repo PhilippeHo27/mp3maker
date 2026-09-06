@@ -1,0 +1,84 @@
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    init: true
+    environment:
+      BASE_PATH: /mp3maker
+      DATA_DIR: /data
+      INTERNAL_HOST: 0.0.0.0
+      ENABLED_PLATFORMS: ${ENABLED_PLATFORMS:-}
+      WORKER_TOKENS: ${WORKER_TOKENS:?Set worker credentials}
+      WORKER_ASSIGNMENTS: ${WORKER_ASSIGNMENTS:?Set worker assignments}
+      TRUST_PROXY: ${TRUST_PROXY:-}
+    volumes:
+      - /home/phil/app-data/mp3maker:/data
+    networks: [media, edge, coolify]
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=coolify
+      - traefik.http.routers.mp3maker.rule=Host(`philippeho.dev`) && PathPrefix(`/mp3maker`)
+      - traefik.http.routers.mp3maker.entrypoints=https
+      - traefik.http.routers.mp3maker.tls=true
+      - traefik.http.routers.mp3maker.tls.certresolver=letsencrypt
+      - traefik.http.routers.mp3maker.service=mp3maker
+      - traefik.http.services.mp3maker.loadbalancer.server.port=3003
+    read_only: true
+    tmpfs: [/tmp:size=16m]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 384m
+    cpus: 0.5
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:3003/mp3maker/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    restart: unless-stopped
+    init: true
+    environment:
+      API_URL: http://web:3004
+      WORKER_ID: hetzner
+      WORKER_TOKEN: ${HETZNER_WORKER_TOKEN:?Set worker credential}
+      WORKER_PLATFORMS: ${HETZNER_PLATFORMS:-soundcloud,bandcamp}
+      HTTPS_PROXY: http://egress:3128
+      HTTP_PROXY: http://egress:3128
+      NO_PROXY: web,pot
+    networks: [media]
+    read_only: true
+    tmpfs: [/tmp:size=192m,mode=1777]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 768m
+    cpus: 1.0
+    pids_limit: 128
+    depends_on:
+      web:
+        condition: service_healthy
+      egress:
+        condition: service_started
+  egress:
+    build:
+      context: .
+      dockerfile: Dockerfile.proxy
+    restart: unless-stopped
+    init: true
+    networks: [media, edge]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 128m
+    cpus: 0.25
+    pids_limit: 64
+networks:
+  coolify:
+    external: true
+  media:
+    internal: true
+  edge: {}
