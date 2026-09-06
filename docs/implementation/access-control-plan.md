@@ -52,48 +52,48 @@ The separate worker listener keeps its existing default-deny bearer authenticati
 Files: `lib/access.js`, `server.js`, `tests/access.test.js`, `package.json`,
 `package-lock.json`.
 
-- [ ] Add integration tests against real HTTP listeners and locally signed RSA JWTs.
+- [x] Add integration tests against real HTTP listeners and locally signed RSA JWTs.
   First assert an unauthenticated request to `/mp3maker/` returns 403; run it and
   observe the current app return 200 before implementing.
-- [ ] Add `createAccess({teamDomain,audience,jwks,nodeEnv})`, returning an Express
+- [x] Add `createAccess({teamDomain,audience,jwks,nodeEnv})`, returning an Express
   middleware or null for unconfigured development. `jwks` is a test-only injected
   key resolver; production always uses the configured team endpoint.
-- [ ] Wire `options.access` or the two environment variables before store creation.
+- [x] Wire `options.access` or the two environment variables before store creation.
   Put the health handler before the gate and move JSON parsing behind it.
-- [ ] Test valid identity, bad signature/algorithm, wrong audience/issuer, expired
+- [x] Test valid identity, bad signature/algorithm, wrong audience/issuer, expired
   and future tokens, missing claims, malformed headers, key-service failure,
   HTML/assets/API/SSE/download/cancel protection, health and worker separation.
-- [ ] Run `npm test` and Python unit tests. Review the diff inline.
+- [x] Run `npm test` and Python unit tests. Review the diff inline.
 
 ### 2. Deployment contract and shared membership
 
 Files: `compose.yaml`, `SETUP.md`, `docs/implementation/progress.md`.
 
-- [ ] Require both Access environment variables on the web service in Compose.
+- [x] Require both Access environment variables on the web service in Compose.
   Keep all network membership and RAW Compose semantics intact.
-- [ ] Document configuration, exact-email group management, revocation/session
+- [x] Document configuration, exact-email group management, revocation/session
   behavior and a fail-closed rollback (keep the gate or stop serving the app).
-- [ ] Inspect the live Coolify app and preserve a local rollback copy of its raw
+- [x] Inspect the live Coolify app and preserve a local rollback copy of its raw
   Compose definition, without committing credentials.
-- [ ] Create the shared group from the existing policy's exact email selector.
+- [x] Create the shared group from the existing policy's exact email selector.
   Replace only that selector with the group's ID in Private Portal's reusable
   policy; preserve every other rule. Create MP3 Maker with one Allow policy
   referencing the same group. Read back and record IDs and nonsecret AUD.
-- [ ] Push the implementation branch, open a PR to main, and wait for CI's Node and
+- [x] Push the implementation branch, open a PR to main, and wait for CI's Node and
   Python tests, three Docker builds and worker selftest.
 
 ### 3. Coordinated release and acceptance
 
-- [ ] Set the app's Access environment variables and raw Compose web env entries.
+- [x] Set the app's Access variables for build-time and runtime; Git reloads raw Compose env entries.
   Deploy the reviewed commit manually; do not add a deployment webhook.
-- [ ] Poll health/deployment and allow Traefik to converge. Recheck container network
+- [x] Poll health/deployment and allow Traefik to converge. Recheck container network
   membership and the desktop worker's connection after replacing the web container.
-- [ ] Verify the public edge requires Access at the bare path, trailing slash, assets
+- [x] Verify the public edge requires Access at the bare path, trailing slash, assets
   and API; verify the portfolio remains public. Test the direct IP with correct
   Host/SNI: missing and forged assertions must return 403 for application routes.
 - [ ] Confirm browser login with the owner when an interactive session is available;
   do not claim human login verified from HTTP redirects alone.
-- [ ] Record any remaining manual acceptance explicitly in the ledger and PR.
+- [x] Record any remaining manual acceptance explicitly in the ledger and PR.
 
 ## References
 

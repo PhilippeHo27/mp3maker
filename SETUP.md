@@ -71,8 +71,11 @@ Cloudflare account `6cba1cadf64d5497e3abb2fefff8cf88`:
   remain valid at the origin until expiration, and an open stream is not revalidated.
 
 Keep Coolify **RAW Compose** enabled and the worker attached only to the internal
-`media` network. Update Access environment entries in both Coolify and its saved
-raw Compose definition; do not let normal Compose processing add worker networks.
+`media` network. Set both Access values as **build-time and runtime** in Coolify:
+Compose interpolates these required variables even during the image build. The
+Git-backed app reloads `compose.yaml` on deployment, including the Access entries;
+its API rejects direct `docker_compose_raw` updates. Do not let normal Compose
+processing add worker networks.
 Releases remain manual. The temporary desktop SSH tunnel targets the web
 container's internal IP; verify its destination after a redeploy.
 
