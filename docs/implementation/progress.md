@@ -9,6 +9,12 @@
 - Created `Private Portal members` group `f3fa84f5-6f0b-4421-8480-d67ea07b83d6` from the existing owner email. Both app policies reference it, verified by readback. Hungry Dogs' other settings remain unchanged. No friends' exact addresses supplied yet.
 - Live Coolify inspection confirms RAW Compose on, auto-deploy off, Strip Prefix off, production platforms unchanged. Saved pre-change raw Compose locally under the desktop profile `.config/coolify/backups/mp3maker-access/compose-before.yaml`.
 - Found a pre-existing temporary-rig discrepancy: desktop `mp3-prod-worker` is on `mp3-feasibility-edge` with `internal=false`, so the network does not enforce proxy-only egress. Requested a separate decision on repairing its attachment after Access; no desktop startup/Tailscale work begun.
+- PR #5 merged after both CI runs passed: all Node/Python tests, all three image builds, and worker selftest. Release commit `ed1a712705f892893b8aed705f4fa65bb70e6b3e`.
+- Coolify rejects direct `docker_compose_raw` PATCH updates for this app. Inspected the running Coolify source: `loadComposeFile(isInit: false)` reloads the Git Compose file during deployment, then RAW processing uses it. No database workaround required.
+- First deployment stopped before replacing containers because the Access values were runtime-only and Compose's build-time interpolation requires them too. Set both nonsecret values to build-time + runtime. Deployment `jukqgk1q1nrvdepde3m7533x` finished successfully.
+- Live verification: edge redirects bare path, trailing slash, assets and API to `philho.cloudflareaccess.com`; portfolio remains 200. Direct-origin HTTPS with correct Host/SNI returns 403 on bare path, page, CSS, API, SSE, file and health. A forged assertion with spoofed loopback forwarded IP also returns 403.
+- Container-local health returns 200. Both `hetzner` and `desktop` workers have fresh heartbeats; assignments and `ENABLED_PLATFORMS=youtube,soundcloud,bandcamp` preserved. Hetzner worker has only `wziljutjgqjjq5tlxnlafonp_media` and that network is internal. Web media IP remains `10.0.8.3`, so the existing tunnel still works.
+- Browser Google/TOTP login has been requested from the user and is not yet claimed verified. Exact friends' emails and the separate desktop isolation repair decision are still pending. No Tailscale or desktop startup work performed.
 
 Approved spec: user plan in conversation, 2026-09-04.
 Tasks: (1) worker feasibility; (2) durable API; (3) public UI; (4) integration, security review, deployment.
